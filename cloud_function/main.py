@@ -26,7 +26,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 PROJECT_ID = os.environ.get("GCP_PROJECT")
 LOCATION = os.environ.get("GCP_REGION", "us-central1")
 DATASET_ID = os.environ.get("BQ_DATASET", "fsi-banking-agentspace.equifax_txns")
-ML_ENDPOINT_ID = os.environ.get("projects/925334697476/locations/us-central1/endpoints/6699776247318183936") # e.g., "projects/123/locations/us-central1/endpoints/456"
+ML_ENDPOINT_ID = os.environ.get("VERTEX_ML_ENDPOINT_ID") # <-- Corrected Line
 
 # Ensure required environment variables are set
 if not all([PROJECT_ID, ML_ENDPOINT_ID]):
