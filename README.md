@@ -23,9 +23,16 @@ python scripts/1_create_features.py
 
 python scripts/2_train_model.py
 
+# First, run the deployment script and get the endpoint ID
 python scripts/3_deploy_model.py
 
+#
+# It will output something like:
+# IMPORTANT: Your Vertex AI Endpoint ID for the Cloud Function is:
+# projects/fsi-banking-agentspace/locations/us-central1/endpoints/YOUR_NEW_ENDPOINT_ID
+#
 
+# Then, use that ID to deploy the function
 gcloud functions deploy transaction-processor \
   --gen2 \
   --runtime=python311 \
@@ -34,4 +41,4 @@ gcloud functions deploy transaction-processor \
   --entry-point=transaction_processor \
   --trigger-http \
   --allow-unauthenticated \
-  --set-env-vars="GCP_PROJECT=fsi-banking-agentspace,BQ_DATASET=fsi-banking-agentspace.equifax_txns,VERTEX_ML_ENDPOINT_ID=projects/fsi-banking-agentspace/locations/us-central1/endpoints/1234567890123456789"
+  --set-env-vars="GCP_PROJECT=fsi-banking-agentspace,BQ_DATASET=fsi-banking-agentspace.equifax_txns,VERTEX_ML_ENDPOINT_ID=projects/fsi-banking-agentspace/locations/us-central1/endpoints/YOUR_NEW_ENDPOINT_ID"

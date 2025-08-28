@@ -1,3 +1,4 @@
+from scipy.sparse import hstack
 import functions_framework
 from flask import jsonify
 import os
@@ -7,6 +8,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from dateutil.relativedelta import relativedelta
 import asyncio
+
 
 # Google Cloud & ML Libraries
 from google.cloud import bigquery
@@ -149,9 +151,19 @@ def _execute_phase_2_ml(scope_filter: str, scope_params: list) -> int:
         logging.info("Phase 2: No transactions to process with ML model.")
         return 0
 
-    # This example assumes the endpoint expects raw JSON and handles featurization internally
-    # or that the model was trained on these raw feature names.
-    instances = df.to_dict('records')
+    # --- START: Added Feature Engineering ---
+    logging.info("Phase 2: Performing feature engineering...")
+    df['text_features'] = df['description_cleaned'].fillna('') + ' ' + df['merchant_name'].fillna('')
+    
+    # Transform data using the loaded transformers
+    X_text = vectorizer.transform(df['text_features'])
+    X_numeric = scaler.transform(df[['amount']])
+    X_categorical = encoder.transform(df[['channel', 'account_type']])
+
+    # Combine features into the format the model expects
+    X_processed = hstack([X_text, X_numeric, X_categorical]).toarray() # Use .toarray() for JSON serialization
+    instances = X_processed.tolist() # Convert to list for the prediction request
+    # --- END: Added Feature Engineering ---
     
     logging.info(f"Phase 2: Sending {len(instances)} instances to Vertex AI Endpoint.")
     predictions = ml_endpoint.predict(instances=instances)
