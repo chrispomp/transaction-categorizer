@@ -5,8 +5,8 @@ bq mk --table \
 
 gcloud auth application-default login
 
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 
 pip install google-cloud-bigquery pandas scikit-learn xgboost joblib google-cloud-aiplatform gcsfs
 
