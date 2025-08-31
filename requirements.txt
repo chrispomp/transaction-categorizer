@@ -1,8 +1,7 @@
-functions-framework==3.*
+# requirements.txt
+
+google.adk
+google-cloud-aiplatform[adk,agent_engines]
 google-cloud-bigquery
-google-cloud-aiplatform
-pandas
-joblib
 db-dtypes
-scikit-learn
-python-dateutil
+cloudpickle
