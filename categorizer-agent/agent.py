@@ -211,7 +211,7 @@ def run_phase2_rules() -> Dict[str, Any]:
     except Exception as e:
         return {"error": f"An error occurred during Phase 2: {e}"}
 
-def get_uncategorized_transactions(batch_size: int = 500) -> str:
+def get_uncategorized_transactions(batch_size: int = 200) -> str:
     """Retrieves a batch of transactions that still need L2 categorization."""
     if not bq_client:
         return json.dumps({"error": "BigQuery client is not initialized."})
@@ -304,7 +304,7 @@ phase2_agent = LlmAgent(
 
 phase3_agent = LlmAgent(
     name="phase3_ai_categorization_agent",
-    model="gemini-2.5-pro",
+    model="gemini-2.5-flash",
     tools=[get_uncategorized_transactions, update_categorizations],
     instruction=f"""
         You are an AI categorization specialist. Your process is as follows:
