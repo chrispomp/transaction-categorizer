@@ -1,26 +1,22 @@
-# app.py
+# agent.py
 
 import json
 import logging
 from typing import Dict, Any
 
 from google.cloud import bigquery
-# Correct ADK imports based on official documentation
-from google.adk.agents import Agent
+from google.adk.agents import Agent, LlmAgent
+from google.adk.tools.agent_tool import AgentTool
 
 # --- Configuration ---
-# Configure logging to see the agent's operations.
 logging.basicConfig(level=logging.INFO)
 
-# Define the full BigQuery table ID for easy reference.
-PROJECT_ID = "fsi-banking-agentspace" # Replace with your project ID
+PROJECT_ID = "fsi-banking-agentspace"
 DATASET_ID = "equifax_txns"
 TABLE_NAME = "transactions"
 TABLE_ID = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_NAME}"
 TEMP_TABLE_ID = f"{PROJECT_ID}.{DATASET_ID}.temp_categorization_updates"
 
-# Initialize the BigQuery client.
-# The client will use the credentials from your gcloud setup.
 try:
     bq_client = bigquery.Client(project=PROJECT_ID)
     logging.info("Successfully initialized BigQuery client.")
@@ -46,9 +42,45 @@ def is_valid_category(category_l2: str) -> bool:
             return True
     return False
 
+# --- Helper Functions (Internal) ---
+def _validate_llm_results(llm_results: list) -> 'pd.DataFrame':
+    """Helper to validate the JSON output from the LLM."""
+    import pandas as pd
+    validated_updates = []
+    if not isinstance(llm_results, list):
+        logging.warning("LLM results are not a list, cannot validate.")
+        return pd.DataFrame()
+    for item in llm_results:
+        if (isinstance(item, dict) and
+            'transaction_id' in item and
+            'category_l2' in item and
+            is_valid_category(item['category_l2'])):
+            validated_updates.append(item)
+    return pd.DataFrame(validated_updates)
+
+def _update_bq_with_dataframe(df: 'pd.DataFrame'):
+    """Helper to upload a DataFrame to a temp table and run a MERGE."""
+    job_config = bigquery.LoadJobConfig(
+        schema=[
+            bigquery.SchemaField("transaction_id", "STRING"),
+            bigquery.SchemaField("category_l2", "STRING"),
+        ],
+        write_disposition="WRITE_TRUNCATE",
+    )
+    bq_client.load_table_from_dataframe(df, TEMP_TABLE_ID, job_config=job_config).result()
+    
+    merge_sql = f"""
+        MERGE `{TABLE_ID}` T
+        USING `{TEMP_TABLE_ID}` U
+        ON T.transaction_id = U.transaction_id
+        WHEN MATCHED THEN
+            UPDATE SET T.category_l2 = U.category_l2, T.categorization_update_timestamp = CURRENT_TIMESTAMP();
+    """
+    bq_client.query(merge_sql).result()
+    logging.info(f"Successfully merged {len(df)} records from temporary table.")
+
+
 # --- Tool Definitions ---
-# Note: The @tool decorator has been removed. Tools are now standard Python functions.
-# They return a final result (string or dict) for the agent to process.
 
 def audit_data_quality() -> str:
     """
@@ -111,20 +143,11 @@ def audit_data_quality() -> str:
 
     return results_markdown
 
-def run_hybrid_categorization() -> Dict[str, Any]:
-    """
-    Executes a three-phase workflow to cleanse, classify, and categorize financial data.
-    - Phase 1: Cleanses text fields and assigns foundational L1 categories.
-    - Phase 2: Applies high-confidence rules for fast and accurate L2 categorization.
-    - Phase 3: Uses the Gemini AI model for remaining, more ambiguous transactions.
-    The tool returns a JSON summary of the operations performed in each phase.
-    """
+def run_phase1_cleansing() -> Dict[str, Any]:
+    """Phase 1: Cleanses text fields and assigns foundational L1 categories."""
     if not bq_client:
         return {"error": "BigQuery client is not initialized."}
-
-    summary = {}
-
-    # --- Phase 1: Data Cleansing & L1 Categorization ---
+    
     sql_phase1 = f"""
         UPDATE `{TABLE_ID}`
         SET
@@ -153,11 +176,15 @@ def run_hybrid_categorization() -> Dict[str, Any]:
         logging.info("Executing Phase 1 SQL...")
         query_job = bq_client.query(sql_phase1)
         query_job.result()
-        summary["phase1_count"] = query_job.num_dml_affected_rows or 0
+        return {"phase1_cleansed_rows": query_job.num_dml_affected_rows or 0}
     except Exception as e:
         return {"error": f"An error occurred during Phase 1: {e}"}
 
-    # --- Phase 2: Rules-Based L2 Categorization ---
+def run_phase2_rules() -> Dict[str, Any]:
+    """Phase 2: Applies high-confidence rules for fast and accurate L2 categorization."""
+    if not bq_client:
+        return {"error": "BigQuery client is not initialized."}
+
     sql_phase2 = f"""
         MERGE `{TABLE_ID}` AS T
         USING (
@@ -180,115 +207,61 @@ def run_hybrid_categorization() -> Dict[str, Any]:
         logging.info("Executing Phase 2 SQL...")
         query_job = bq_client.query(sql_phase2)
         query_job.result()
-        summary["phase2_count"] = query_job.num_dml_affected_rows or 0
+        return {"phase2_rules_categorized_rows": query_job.num_dml_affected_rows or 0}
     except Exception as e:
         return {"error": f"An error occurred during Phase 2: {e}"}
 
-    # --- Phase 3: Gemini-Powered Categorization ---
-    logging.info("Starting Phase 3: Gemini AI Categorization.")
-    summary["phase3_count"] = 0
+def get_uncategorized_transactions(batch_size: int = 500) -> str:
+    """Retrieves a batch of transactions that still need L2 categorization."""
+    if not bq_client:
+        return json.dumps({"error": "BigQuery client is not initialized."})
     
-    batch_size = 500
-    while True:
-        fetch_sql = f"""
-            SELECT transaction_id, description_cleaned, merchant_name_cleaned
-            FROM `{TABLE_ID}` WHERE category_l2 IS NULL LIMIT {batch_size};
-        """
+    fetch_sql = f"""
+        SELECT transaction_id, description_cleaned, merchant_name_cleaned
+        FROM `{TABLE_ID}` WHERE category_l2 IS NULL LIMIT {batch_size};
+    """
+    try:
+        logging.info(f"Fetching up to {batch_size} uncategorized transactions.")
         batch_df = bq_client.query(fetch_sql).to_dataframe()
-
-        if batch_df.empty:
-            logging.info("No more transactions to categorize with AI. Exiting loop.")
-            break
-
-        batch_data_json = batch_df.to_json(orient='records')
-        prompt = f"""
-            Analyze each transaction in the JSON array below.
-            Assign the most appropriate `category_l2` from this list: {json.dumps(VALID_CATEGORIES)}.
-            Return a valid JSON array where each object has only `transaction_id` and `category_l2`.
-            DATA: {batch_data_json}
-        """
         
-        try:
-            logging.info(f"Sending batch of {len(batch_df)} to Gemini...")
-            # NOTE: The llm object is implicitly available to tools in ADK.
-            response = llm.send_request(prompt)
-            cleaned_response = response.strip().replace("```json", "").replace("```", "").strip()
-            llm_results = json.loads(cleaned_response)
-        except (json.JSONDecodeError, Exception) as e:
-            logging.error(f"Error processing AI response. Skipping batch. Error: {e}")
-            continue
+        if batch_df.empty:
+            logging.info("No more transactions to categorize with AI.")
+            return json.dumps({"status": "complete", "count": 0})
+            
+        return batch_df.to_json(orient='records')
+    except Exception as e:
+        return json.dumps({"error": f"Failed to fetch transactions: {e}"})
 
-        validated_updates_df =_validate_llm_results(llm_results)
+def update_categorizations(categorizations_json: str) -> Dict[str, Any]:
+    """Updates the BigQuery table with the L2 categories provided by the AI."""
+    if not bq_client:
+        return {"error": "BigQuery client is not initialized."}
+    
+    try:
+        llm_results = json.loads(categorizations_json)
+        validated_updates_df = _validate_llm_results(llm_results)
         
         if validated_updates_df.empty:
-            logging.warning("No valid categorizations returned from AI for this batch.")
-            continue
+            logging.warning("No valid categorizations were provided to update.")
+            return {"status": "no_valid_updates", "updated_count": 0}
         
-        try:
-            _update_bq_with_dataframe(validated_updates_df)
-            summary["phase3_count"] += len(validated_updates_df)
-        except Exception as e:
-            logging.error(f"Error updating database with AI results: {e}")
-            continue
-
-    # Final Summary Count
-    final_count_df = bq_client.query(
-        f"SELECT count(transaction_id) as total FROM `{TABLE_ID}` WHERE category_l2 IS NULL"
-    ).to_dataframe()
-    summary["final_uncategorized"] = int(final_count_df['total'][0])
-
-    return summary
-
-def _validate_llm_results(llm_results: list) -> 'pd.DataFrame':
-    """Helper to validate the JSON output from the LLM."""
-    import pandas as pd
-    validated_updates = []
-    for item in llm_results:
-        if (isinstance(item, dict) and
-            'transaction_id' in item and
-            'category_l2' in item and
-            is_valid_category(item['category_l2'])):
-            validated_updates.append(item)
-    return pd.DataFrame(validated_updates)
-
-def _update_bq_with_dataframe(df: 'pd.DataFrame'):
-    """Helper to upload a DataFrame to a temp table and run a MERGE."""
-    import pandas as pd
-    job_config = bigquery.LoadJobConfig(
-        schema=[
-            bigquery.SchemaField("transaction_id", "STRING"),
-            bigquery.SchemaField("category_l2", "STRING"),
-        ],
-        write_disposition="WRITE_TRUNCATE",
-    )
-    bq_client.load_table_from_dataframe(df, TEMP_TABLE_ID, job_config=job_config).result()
-    
-    merge_sql = f"""
-        MERGE `{TABLE_ID}` T
-        USING `{TEMP_TABLE_ID}` U
-        ON T.transaction_id = U.transaction_id
-        WHEN MATCHED THEN
-            UPDATE SET T.category_l2 = U.category_l2, T.categorization_update_timestamp = CURRENT_TIMESTAMP();
-    """
-    bq_client.query(merge_sql).result()
-    logging.info(f"Successfully merged {len(df)} records from temporary table.")
-
+        _update_bq_with_dataframe(validated_updates_df)
+        return {"status": "success", "updated_count": len(validated_updates_df)}
+    except json.JSONDecodeError:
+        return {"error": "Invalid JSON format for categorizations."}
+    except Exception as e:
+        return {"error": f"Failed to update database: {e}"}
 
 def reset_all_categorizations(confirm: bool = False) -> Dict[str, Any]:
     """
     Resets and clears ALL categorization and data cleansing fields for all transactions.
     This includes category_l1, category_l2, description_cleaned, and merchant_name_cleaned.
     This is a destructive action. Requires user confirmation by passing confirm=True.
-
-    Args:
-        confirm: Must be set to True to execute the reset.
     """
     if not bq_client:
         return {"error": "BigQuery client is not initialized."}
 
     if not confirm:
-        # The agent's instructions will guide it to re-prompt the user
-        # when it receives this response.
         return {
             "confirmation_required": True,
             "message": "This will clear ALL categorization data. This action cannot be undone. Are you sure you want to proceed?"
@@ -313,26 +286,57 @@ def reset_all_categorizations(confirm: bool = False) -> Dict[str, Any]:
     except Exception as e:
         return {"error": f"An error occurred during the reset operation: {e}"}
 
-# --- Agent Definition ---
-# This is the main entry point for your agent, defined AFTER the tools.
-# The `instructions` are updated to handle the new return types from the tools.
-agent = Agent(
+# --- Sub-Agent Definitions ---
+
+phase1_agent = LlmAgent(
+    name="phase1_cleansing_agent",
     model="gemini-2.5-flash",
-    # Pass the tool functions directly into the tools list.
+    tools=[run_phase1_cleansing],
+    instruction="Your task is to run the data cleansing and L1 categorization phase by calling the `run_phase1_cleansing` tool."
+)
+
+phase2_agent = LlmAgent(
+    name="phase2_rules_agent",
+    model="gemini-2.5-flash",
+    tools=[run_phase2_rules],
+    instruction="Your task is to run the rules-based L2 categorization phase by calling the `run_phase2_rules` tool."
+)
+
+phase3_agent = LlmAgent(
+    name="phase3_ai_categorization_agent",
+    model="gemini-2.5-pro",
+    tools=[get_uncategorized_transactions, update_categorizations],
+    instruction=f"""
+        You are an AI categorization specialist. Your process is as follows:
+        1. Use the `get_uncategorized_transactions` tool to fetch a batch of data.
+        2. If the tool returns a JSON object with a 'status' of 'complete', your job is done. Announce that there are no more transactions to process.
+        3. If you receive a JSON array of transaction data, analyze each transaction within it.
+        4. For each transaction, assign the most appropriate `category_l2` from this list: {json.dumps(VALID_CATEGORIES)}.
+        5. Format your results as a JSON array string where each object has only `transaction_id` and `category_l2`.
+        6. Use the `update_categorizations` tool, passing this JSON string as the `categorizations_json` argument to update the database.
+        7. After updating, repeat the process by calling `get_uncategorized_transactions` again to see if more data is available. Continue until the tool returns a 'complete' status.
+    """
+)
+
+
+# --- Main Orchestrator Agent ---
+# This is the entry point the ADK looks for.
+root_agent = Agent(
+    name="transaction_categorizer_orchestrator",
+    model="gemini-2.5-flash",
     tools=[
         audit_data_quality,
-        run_hybrid_categorization,
-        reset_all_categorizations
+        reset_all_categorizations,
+        AgentTool(agent=phase1_agent),
+        AgentTool(agent=phase2_agent),
+        AgentTool(agent=phase3_agent)
     ],
-    instructions="""You are a meticulous and proactive Financial Data Analyst agent.
-    Your primary function is to analyze, cleanse, and categorize financial transactions using your available tools.
-    
-    **Your Behavior:**
-    - When a tool returns a result, present it clearly to the user.
-    - If a tool returns a JSON object with a summary, format it into a user-friendly, readable summary using markdown.
-    - If a tool returns a response with `{"confirmation_required": true}`, you MUST ask the user the question from the 'message' field and wait for their confirmation before calling the tool again with `confirm=True`.
-    - Always conclude your responses by suggesting the next logical step (e.g., after an audit, suggest running categorization).
-    - Present any query results or audit tables in clear, easy-to-read markdown.
-    - If a tool returns an error, apologize and present the error message clearly to the user.
-    """,
+    instruction="""
+    You are the orchestrator for a multi-phase transaction categorization process.
+    Your available tools can run an audit, reset data, or execute the categorization phases using specialized agents.
+    - Start by suggesting an `audit_data_quality` check to the user to assess the current state of the data.
+    - Based on user requests, you can run the categorization phases sequentially by calling the `phase1_cleansing_agent`, `phase2_rules_agent`, and `phase3_ai_categorization_agent` tools.
+    - If the user wants to start over, use the `reset_all_categorizations` tool, but always ask for confirmation first by checking the tool's response.
+    - Clearly report the summary from each tool call back to the user and suggest the next logical step.
+    """
 )

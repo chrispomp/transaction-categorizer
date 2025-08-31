@@ -3,5 +3,9 @@
 google.adk
 google-cloud-aiplatform[adk,agent_engines]
 google-cloud-bigquery
+google-cloud-bigquery-storage
 db-dtypes
 cloudpickle
+tabulate
+pandas
+pandas-gbq
