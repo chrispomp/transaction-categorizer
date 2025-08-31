@@ -9,3 +9,5 @@ cloudpickle
 tabulate
 pandas
 pandas-gbq
+python-dotenv
+google-generativeai
