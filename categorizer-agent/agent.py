@@ -365,52 +365,39 @@ async def report_batch_progress(callback_context: CallbackContext) -> types.Cont
     """
     logger.info("After-agent callback 'report_batch_progress' triggered.")
     try:
-        # The invocation_context contains the current session, which holds event history.
-        # This is the correct way to access session state within a callback.
-        session = callback_context.invocation_context.session
+        # **THE FIX**: The session is a direct attribute of the CallbackContext for agent callbacks.
+        # My previous version incorrectly used .invocation_context, which was causing the error.
+        session = callback_context.session
         if not session or not session.events:
             logger.info("Callback triggered but no session or events found to process.")
             return None
 
-        # The result of the last tool call is in the most recent event.
         last_event = session.events[-1]
 
-        # Defensively check that the event is a tool response from our update tool.
-        # The `author` of a tool response event is "user".
         if (last_event.author == "user" and
             last_event.content and
             last_event.content.parts and
             hasattr(last_event.content.parts[0], 'function_response') and
             last_event.content.parts[0].function_response.name == "update_categorizations_in_bigquery"):
 
-            # Extract the JSON string from the tool's response field.
             tool_response_dict = last_event.content.parts[0].function_response.response
-            
-            # The response is already a dict from the tool, no need to json.loads here.
             updated_count = tool_response_dict.get("updated_count", 0)
 
             if updated_count > 0:
-                # This is the user-facing message that will be streamed back.
                 update_message = f"✅ **Progress:** AI categorized a batch of {updated_count} transactions. Fetching the next batch..."
                 logger.info("Yielding progress update to user: %s", update_message)
-                
-                # Returning a `Content` object makes the ADK Runner yield it as a new event,
-                # sending it directly to the user in real-time.
                 return types.Content(role="model", parts=[types.Part(text=update_message)])
             else:
                 logger.info("Last tool call updated 0 records. No progress update to send.")
 
     except (IndexError, KeyError, AttributeError) as e:
-        # This is a safe failure. It often means the last event wasn't the one we were
-        # looking for, which is expected in some parts of the agent's execution.
         logger.warning(
             "Could not parse tool response for progress update. "
             "This is normal if the last action wasn't an update. Error: %s", e
         )
 
-    # Return None if no update is needed for the user.
     return None
-# ----------------------------------------
+
 
 # This agent performs the reasoning step (categorization) and uses tools for I/O.
 ai_batch_processor_agent = LlmAgent(
