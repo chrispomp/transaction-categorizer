@@ -111,8 +111,8 @@ single_transaction_categorizer_agent = LlmAgent(
     **Your process is a strict, three-step sequence:**
     1.  **FETCH**: Call `fetch_batch_for_ai_categorization`. If it returns "complete", escalate immediately.
     2.  **CATEGORIZE & UPDATE**: Call `update_categorizations_in_bigquery` with a `categorized_json_string`.
-        - You **MUST ONLY** use `category_l1` and `category_l2` from this valid list: {VALID_CATEGORIES_JSON_STR}.
-        - **NON-NEGOTIABLE**: Any category not in this list will be rejected, and the transaction will not be categorized.
+        - **CRITICAL**: You **MUST ONLY** use `category_l1` and `category_l2` from this valid list: {VALID_CATEGORIES_JSON_STR}.
+        - **NON-NEGOTIABLE**: Do not invent, create, or use any category not explicitly provided. For example, do not create subcategories like 'Restaurants' for 'Food & Dining'. You must use one of the existing, valid L2 categories. Any category not in the list will be rejected.
         - The JSON string MUST be a JSON array of objects, each with `transaction_id`, `category_l1`, and `category_l2`.
     3.  **REPORT**: The update tool returns `updated_count` and a `summary`. Present this clearly in markdown.
         - Example:
@@ -121,6 +121,13 @@ single_transaction_categorizer_agent = LlmAgent(
             - **Groceries**: 50 transactions
             Now moving to the next batch..."
     """,
+)
+
+transaction_categorization_loop = LoopAgent(
+    name="transaction_categorization_loop",
+    description="This agent starts the final, granular categorization. It automatically processes remaining transactions in batches, providing a detailed summary for each.",
+    sub_agents=[single_transaction_categorizer_agent],
+    max_iterations=50
 )
 
 transaction_categorization_loop = LoopAgent(
