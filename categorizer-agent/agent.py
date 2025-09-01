@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # --- Loop Agents for Batch Processing ---
 single_recurring_batch_agent = LlmAgent(
     name="single_recurring_batch_agent",
-    model="gemini-2.5-pro",
+    model="gemini-2.5-flash",
     tools=[get_recurring_candidates_batch, apply_bulk_recurring_flags],
     instruction="""
     Your purpose is to perform one cycle of BATCH recurring transaction identification.
@@ -47,12 +47,14 @@ single_recurring_batch_agent = LlmAgent(
     """,
 )
 
+# MODIFIED: Two-step initialization for recurring_identification_loop
 recurring_identification_loop = LoopAgent(
     name="recurring_identification_loop",
     description="This agent starts an AI-driven process to find and flag recurring transactions. It processes merchants in batches and provides real-time summaries.",
-    sub_agents=[single_recurring_batch_agent],
     max_iterations=20
 )
+recurring_identification_loop.sub_agents.append(single_recurring_batch_agent)
+
 
 single_merchant_batch_agent = LlmAgent(
     name="single_merchant_batch_agent",
@@ -63,19 +65,21 @@ single_merchant_batch_agent = LlmAgent(
 
     **Your process is a strict, two-step sequence:**
     1.  **FETCH BATCH**: Call `get_merchant_batch_to_categorize`. If the tool returns a "complete" status, you must stop and escalate.
-    2.  **ANALYZE & UPDATE BATCH**: Analyze the JSON data for ALL merchants in the batch. You **MUST ONLY** use `category_l1` and `category_l2` from this list: {VALID_CATEGORIES_JSON_STR}. Any category not in this list will be rejected by the tool and the transaction will not be categorized.
+    2.  **ANALYZE & UPDATE BATCH**: Analyze the JSON data for ALL merchants in the batch. You **MUST ONLY** use `category_l1` and `category_l2` from this list: {{VALID_CATEGORIES_JSON_STR}}. Any category not in this list will be rejected by the tool and the transaction will not be categorized.
         - **NON-NEGOTIABLE**: This is a critical constraint. Do not invent, create, or use any category not explicitly provided.
         - Then, call `apply_bulk_merchant_update` ONCE with a single JSON array. Each merchant object MUST include `merchant_name_cleaned`, `transaction_type`, `category_l1`, and `category_l2`.
     3.  **REPORT BATCH**: The tool returns `updated_count` and a `summary`. Create a user-friendly markdown report, e.g., "🛒 Processed a batch of 3 merchants, updating 112 transactions. Key updates include 'grubhub' to Food & Dining."
     """,
 )
 
+# MODIFIED: Two-step initialization for merchant_categorization_loop
 merchant_categorization_loop = LoopAgent(
     name="merchant_categorization_loop",
     description="This agent starts an efficient, automated categorization by processing BATCHES of common uncategorized merchants, providing a summary for each batch.",
-    sub_agents=[single_merchant_batch_agent],
     max_iterations=20
 )
+merchant_categorization_loop.sub_agents.append(single_merchant_batch_agent)
+
 
 single_pattern_batch_agent = LlmAgent(
     name="single_pattern_batch_agent",
@@ -87,19 +91,21 @@ single_pattern_batch_agent = LlmAgent(
     **Your process is a strict, three-step sequence:**
     1.  **FETCH BATCH:** First, you MUST call `get_pattern_batch_to_categorize` to get a batch of up to 20 pattern groups.
         - If the tool returns a "complete" status, you must stop and escalate.
-    2.  **ANALYZE & UPDATE BATCH:** Analyze the JSON data for ALL patterns. For each one, you **MUST ONLY** use `category_l1` and `category_l2` from this valid list: {VALID_CATEGORIES_JSON_STR}.
+    2.  **ANALYZE & UPDATE BATCH:** Analyze the JSON data for ALL patterns. For each one, you **MUST ONLY** use `category_l1` and `category_l2` from this valid list: {{VALID_CATEGORIES_JSON_STR}}.
         - **NON-NEGOTIABLE**: Any category not in this list will be rejected by the tool.
         - Then, call `apply_bulk_pattern_update` ONCE. Your output must be a single JSON array that includes an entry for every pattern in the batch you received.
     3.  **REPORT BATCH:** The update tool returns `updated_count` and a `summary`. Use this to create a user-friendly markdown report. For example: "🧾 Processed a batch of 5 patterns, updating 88 transactions. This included patterns like 'payment thank you' being set to Credit Card Payment."
     """,
 )
 
+# MODIFIED: Two-step initialization for pattern_categorization_loop
 pattern_categorization_loop = LoopAgent(
     name="pattern_categorization_loop",
     description="This agent starts an advanced, batch-based categorization on common transaction description patterns, providing real-time summaries.",
-    sub_agents=[single_pattern_batch_agent],
     max_iterations=20
 )
+pattern_categorization_loop.sub_agents.append(single_pattern_batch_agent)
+
 
 single_transaction_categorizer_agent = LlmAgent(
     name="single_transaction_categorizer_agent",
@@ -111,7 +117,7 @@ single_transaction_categorizer_agent = LlmAgent(
     **Your process is a strict, three-step sequence:**
     1.  **FETCH**: Call `fetch_batch_for_ai_categorization`. If it returns "complete", escalate immediately.
     2.  **CATEGORIZE & UPDATE**: Call `update_categorizations_in_bigquery` with a `categorized_json_string`.
-        - **CRITICAL**: You **MUST ONLY** use `category_l1` and `category_l2` from this valid list: {VALID_CATEGORIES_JSON_STR}.
+        - **CRITICAL**: You **MUST ONLY** use `category_l1` and `category_l2` from this valid list: {{VALID_CATEGORIES_JSON_STR}}.
         - **NON-NEGOTIABLE**: Do not invent, create, or use any category not explicitly provided. For example, do not create subcategories like 'Restaurants' for 'Food & Dining'. You must use one of the existing, valid L2 categories. Any category not in the list will be rejected.
         - The JSON string MUST be a JSON array of objects, each with `transaction_id`, `category_l1`, and `category_l2`.
     3.  **REPORT**: The update tool returns `updated_count` and a `summary`. Present this clearly in markdown.
@@ -123,19 +129,14 @@ single_transaction_categorizer_agent = LlmAgent(
     """,
 )
 
+# MODIFIED: Two-step initialization for transaction_categorization_loop
 transaction_categorization_loop = LoopAgent(
     name="transaction_categorization_loop",
     description="This agent starts the final, granular categorization. It automatically processes remaining transactions in batches, providing a detailed summary for each.",
-    sub_agents=[single_transaction_categorizer_agent],
     max_iterations=50
 )
+transaction_categorization_loop.sub_agents.append(single_transaction_categorizer_agent)
 
-transaction_categorization_loop = LoopAgent(
-    name="transaction_categorization_loop",
-    description="This agent starts the final, granular categorization. It automatically processes remaining transactions in batches, providing a detailed summary for each.",
-    sub_agents=[single_transaction_categorizer_agent],
-    max_iterations=100
-)
 
 # --- Root Orchestrator Agent ---
 root_agent = Agent(
@@ -166,25 +167,28 @@ root_agent = Agent(
         Please choose an option to begin:
 
         1.  📊 **Audit Data Quality**: Get a high-level overview and identify issues in your data.
-        2.  ⚙️ **Run Categorization**: Cleanse, classify, and categorize your data using rules and AI.
-        3.  🔎 **Conduct Custom Research**: Analyze transactional data using natural language.
-        4.  ➕ **Create Custom Rule**: Create a custom transaction categorizaton rule.
-        4.  🔄 **Reset All Categorizations**: Clear all data cleansing and category assignments."
+        2.  ⚙️ **Run Full Categorization**: Cleanse and categorize your data using rules and AI (excluding recurring analysis).
+        3.  🔁 **Analyze Recurring Transactions**: Identify and harmonize recurring transactions like subscriptions and bills.
+        4.  🔎 **Conduct Custom Research**: Analyze transactional data using natural language.
+        5.  ➕ **Create Custom Rule**: Create a custom transaction categorizaton rule.
+        6.  🔄 **Reset All Categorizations**: Clear all data cleansing and category assignments."
 
     2.  **Executing User's Choice**:
         - If the user chooses **1 (Audit)**, call `audit_data_quality` and present the results.
-        - If the user chooses **2 (Run Categorization)**, you must execute the full, end-to-end categorization workflow. This involves calling a sequence of tools and agents in a specific order. You MUST follow this order and report on the outcome of each step before proceeding to the next.
+        - If the user chooses **2 (Run Full Categorization)**, you must execute the main categorization workflow. You MUST follow this order and report on the outcome of each step before proceeding to the next.
             - **Step 1: Rule Conflict Review:** Call `review_and_resolve_rule_conflicts`.
             - **Step 2: Data Cleansing:** Call `run_data_cleansing`.
             - **Step 3: Rules Application:** Call `apply_categorization_rules`.
-            - **Step 4: AI Recurring Identification:** Call the `recurring_identification_loop` agent.
-            - **Step 5: Harmonize Recurring:** Call `run_recurring_transaction_harmonization`.
-            - **Step 6: AI Merchant Categorization:** Call the `merchant_categorization_loop` agent.
-            - **Step 7: AI Pattern Categorization:** Call the `pattern_categorization_loop` agent.
-            - **Step 8: AI Transaction-Level Categorization:** Call the `transaction_categorization_loop` agent.
-            - **Step 9: Learn New Rules:** Call `harvest_new_rules` to learn from the AI's work.
+            - **Step 4: AI Merchant Categorization:** Call the `merchant_categorization_loop` agent.
+            - **Step 5: AI Pattern Categorization:** Call the `pattern_categorization_loop` agent.
+            - **Step 6: AI Transaction-Level Categorization:** Call the `transaction_categorization_loop` agent.
+            - **Step 7: Learn New Rules:** Call `harvest_new_rules` to learn from the AI's work.
             - After the final step, provide a concluding summary.
-        - If the user chooses **3 (Reset)**, call `reset_all_categorizations`. You must first call with `confirm=False`, show the user the warning, and only proceed if they explicitly confirm.
+        - If the user chooses **3 (Analyze Recurring Transactions)**, you must execute the dedicated recurring analysis workflow. You MUST follow this order and report on the outcome of each step.
+            - **Step 1: AI Recurring Identification:** Call the `recurring_identification_loop` agent.
+            - **Step 2: Harmonize Recurring:** Call `run_recurring_transaction_harmonization`.
+            - After the final step, provide a concluding summary.
+        - If the user chooses **6 (Reset)**, call `reset_all_categorizations`. You must first call with `confirm=False`, show the user the warning, and only proceed if they explicitly confirm.
 
     3.  **Handling Follow-up Questions**: After completing a task, ask the user what they would like to do next.
 
@@ -192,7 +196,7 @@ root_agent = Agent(
     - If the user asks to create a new rule (e.g., "set up a rule for medical expenses"), you must guide them through the process.
     - **Analyze the Request:** Determine the key information from the user's request.
     - **Gather Information:** Ask clarifying questions to get all the required parameters for the `add_rule_to_table` tool: `identifier`, `rule_type` ('MERCHANT' or 'PATTERN'), `category_l1`, `category_l2`, and `transaction_type` ('Debit', 'Credit', or 'All'). Also ask if it should be a recurring rule.
-    - **Propose and Confirm:** Propose the complete rule to the user in a clear format. Example: "Great! I'm ready to create a rule. Does this look correct?\n\n- **Match On**: 'MEDICAL'\n- **Rule Type**: PATTERN\n- **Set Category To**: Expense / Medical\n- **For Transaction Type**: All\n- **Mark as Recurring**: No"
+    - **Propose and Confirm:** Propose the complete rule to the user in a clear format. Example: "Great! I'm ready to create a rule. Does this look correct?\\n\\n- **Match On**: 'MEDICAL'\\n- **Rule Type**: PATTERN\\n- **Set Category To**: Expense / Medical\\n- **For Transaction Type**: All\\n- **Mark as Recurring**: No"
     - **Execute:** Once the user confirms, call the `add_rule_to_table` tool with the confirmed parameters.
 
     **Ad-hoc Queries:**
