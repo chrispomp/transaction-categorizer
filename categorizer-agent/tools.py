@@ -138,7 +138,7 @@ def execute_custom_query(query: str) -> str:
 def run_data_cleansing() -> str:
     """
     Cleanses the raw merchant and description fields for all transactions that haven't been cleaned yet.
-    This involves converting to lowercase and removing special characters.
+    This involves converting to uppercase and removing special characters.
     """
     logger.info("Starting data cleansing for all transactions...")
     # This query will cleanse the raw fields for any transaction where the
@@ -148,8 +148,8 @@ def run_data_cleansing() -> str:
     USING (
         SELECT
             transaction_id,
-            TRIM(LOWER(REGEXP_REPLACE(REGEXP_REPLACE(REPLACE(IFNULL(description_raw, ''), '-', ''), r'[^a-zA-Z0-9\\s]', ' '), r'\\s+', ' '))) AS new_description_cleaned,
-            TRIM(LOWER(
+            TRIM(UPPER(REGEXP_REPLACE(REGEXP_REPLACE(REPLACE(IFNULL(description_raw, ''), '-', ''), r'[^a-zA-Z0-9\\s]', ' '), r'\\s+', ' '))) AS new_description_cleaned,
+            TRIM(UPPER(
                 REGEXP_EXTRACT(
                     REGEXP_REPLACE(REGEXP_REPLACE(REPLACE(IFNULL(merchant_name_raw, ''), '-', ''), r'[^a-zA-Z0-9\\s\\*#-]', ''), r'\\s+', ' '),
                     r'^(?:SQ\\s*\\*|PYPL\\s*\\*|CL\\s*\\*|\\*\\s*)?([^*#-]+)'
@@ -947,3 +947,97 @@ def harvest_new_rules() -> str:
     except (GoogleAPICallError, Exception) as e:
         logger.error(f"❌ BigQuery error during rule harvesting: {e}")
         return f"❌ **Error During Learning**: An error occurred while trying to save new rules. Please check the logs. Error: {e}"
+
+
+def add_rule_to_table(
+    identifier: str,
+    rule_type: str,
+    category_l1: str,
+    category_l2: str,
+    transaction_type: str,
+    is_recurring_rule: bool | None = None
+) -> str:
+    """
+    Adds or updates a user-defined rule in the categorization_rules table.
+
+    Args:
+        identifier: The string to match (e.g., a merchant name or a description pattern).
+        rule_type: The type of rule, either 'MERCHANT' or 'PATTERN'.
+        category_l1: The Level 1 category to assign.
+        category_l2: The Level 2 category to assign.
+        transaction_type: The type of transaction this rule applies to ('Debit', 'Credit', or 'All').
+        is_recurring_rule: (Optional) If provided, sets whether the transaction should be flagged as recurring.
+    """
+    logger.info(f"Attempting to add or update user-defined rule for identifier: '{identifier}'")
+
+    # Validate inputs from the LLM to prevent errors.
+    if rule_type not in ['MERCHANT', 'PATTERN']:
+        return f"❌ Invalid rule_type: '{rule_type}'. Must be 'MERCHANT' or 'PATTERN'."
+    if transaction_type not in ['Debit', 'Credit', 'All']:
+        return f"❌ Invalid transaction_type: '{transaction_type}'. Must be 'Debit', 'Credit', or 'All'."
+    if not is_valid_category(category_l1, category_l2):
+        return f"❌ Invalid category combination: L1='{category_l1}', L2='{category_l2}'."
+
+    # User-defined rules get a very high confidence score to ensure they are prioritized.
+    user_rule_confidence = 999
+
+    # Use a parameterized MERGE statement to safely add or update the rule, preventing SQL injection.
+    merge_sql = f"""
+    MERGE `{RULES_TABLE_ID}` R
+    USING (
+        SELECT
+            @identifier AS identifier,
+            @rule_type AS rule_type,
+            @transaction_type AS transaction_type,
+            @category_l1 AS category_l1,
+            @category_l2 AS category_l2,
+            @is_recurring_rule AS is_recurring_rule,
+            @confidence_score AS confidence_score
+    ) AS NewRule
+    ON R.identifier = NewRule.identifier
+        AND R.rule_type = NewRule.rule_type
+        AND R.transaction_type = NewRule.transaction_type
+    WHEN MATCHED THEN
+        UPDATE SET
+            category_l1 = NewRule.category_l1,
+            category_l2 = NewRule.category_l2,
+            is_recurring_rule = NewRule.is_recurring_rule,
+            confidence_score = NewRule.confidence_score,
+            last_updated_timestamp = CURRENT_TIMESTAMP(),
+            is_active = TRUE
+    WHEN NOT MATCHED THEN
+        INSERT (rule_id, rule_type, identifier, transaction_type, category_l1, category_l2, is_recurring_rule, confidence_score, created_timestamp, last_updated_timestamp, is_active)
+        VALUES (
+            GENERATE_UUID(),
+            NewRule.rule_type,
+            NewRule.identifier,
+            NewRule.transaction_type,
+            NewRule.category_l1,
+            NewRule.category_l2,
+            NewRule.is_recurring_rule,
+            NewRule.confidence_score,
+            CURRENT_TIMESTAMP(),
+            CURRENT_TIMESTAMP(),
+            TRUE
+        );
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("identifier", "STRING", identifier.upper()),
+            bigquery.ScalarQueryParameter("rule_type", "STRING", rule_type),
+            bigquery.ScalarQueryParameter("transaction_type", "STRING", transaction_type),
+            bigquery.ScalarQueryParameter("category_l1", "STRING", category_l1),
+            bigquery.ScalarQueryParameter("category_l2", "STRING", category_l2),
+            bigquery.ScalarQueryParameter("is_recurring_rule", "BOOL", is_recurring_rule),
+            bigquery.ScalarQueryParameter("confidence_score", "INT64", user_rule_confidence),
+        ]
+    )
+
+    try:
+        job = bq_client.query(merge_sql, job_config=job_config)
+        job.result()
+        logger.info(f"Successfully added/updated rule for identifier: '{identifier}'.")
+        return f"✅ **Rule Created**: I have successfully created a new rule for '{identifier.upper()}'."
+    except (GoogleAPICallError, Exception) as e:
+        logger.error(f"❌ BigQuery error during custom rule creation: {e}")
+        return f"❌ **Error Creating Rule**: An error occurred while trying to create the rule. Please check the logs. Error: {e}"

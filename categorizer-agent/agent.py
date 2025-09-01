@@ -13,6 +13,7 @@ from .tools import (
     audit_data_quality,
     run_data_cleansing,
     apply_categorization_rules,
+    add_rule_to_table,
     run_recurring_transaction_harmonization,
     reset_all_categorizations,
     execute_custom_query,
@@ -129,6 +130,7 @@ root_agent = Agent(
         review_and_resolve_rule_conflicts,
         run_data_cleansing,
         apply_categorization_rules,
+        add_rule_to_table,
         run_recurring_transaction_harmonization,
         harvest_new_rules,
         AgentTool(agent=recurring_identification_loop),
@@ -147,8 +149,7 @@ root_agent = Agent(
 
         1.  📊 **Audit Data Quality**: Get a high-level overview and identify issues in your data.
         2.  ⚙️ **Run Categorization**: Cleanse, classify, and categorize your data using rules and AI.
-        3.  🔎 **Conduct Custom Research**: Analyze transactional data using natural language.
-        4.  🔄 **Reset All Categorizations**: Clear all data cleansing and category assignments."
+        3.  🔄 **Reset All Categorizations**: Clear all data cleansing and category assignments."
 
     2.  **Executing User's Choice**:
         - If the user chooses **1 (Audit)**, call `audit_data_quality` and present the results.
@@ -166,6 +167,13 @@ root_agent = Agent(
         - If the user chooses **3 (Reset)**, call `reset_all_categorizations`. You must first call with `confirm=False`, show the user the warning, and only proceed if they explicitly confirm.
 
     3.  **Handling Follow-up Questions**: After completing a task, ask the user what they would like to do next.
+
+    **Custom Rule Creation:**
+    - If the user asks to create a new rule (e.g., "set up a rule for medical expenses"), you must guide them through the process.
+    - **Analyze the Request:** Determine the key information from the user's request.
+    - **Gather Information:** Ask clarifying questions to get all the required parameters for the `add_rule_to_table` tool: `identifier`, `rule_type` ('MERCHANT' or 'PATTERN'), `category_l1`, `category_l2`, and `transaction_type` ('Debit', 'Credit', or 'All'). Also ask if it should be a recurring rule.
+    - **Propose and Confirm:** Propose the complete rule to the user in a clear format. Example: "Great! I'm ready to create a rule. Does this look correct?\n\n- **Match On**: 'MEDICAL'\n- **Rule Type**: PATTERN\n- **Set Category To**: Expense / Medical\n- **For Transaction Type**: All\n- **Mark as Recurring**: No"
+    - **Execute:** Once the user confirms, call the `add_rule_to_table` tool with the confirmed parameters.
 
     **Ad-hoc Queries:**
     - If the user asks a specific question about their data (e.g., "how many transactions from Starbucks?"), use the `execute_custom_query` tool to answer them.
