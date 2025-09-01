@@ -77,14 +77,14 @@ def audit_data_quality() -> str:
     return results_markdown
 
 
-def reset_all_categorizations(tool_context: ToolContext, confirm: bool = False) -> str:
+def reset_all_categorizations(_tool_context: ToolContext, confirm: bool = False) -> str:
     """
     A destructive tool to reset all categorization and cleansing fields in the table.
     Requires explicit confirmation to proceed.
     """
     if not confirm:
         logger.warning("Reset requested without confirmation. Awaiting user confirmation.")
-        return "⚠️ **Confirmation Required**\\n\\nThis is a destructive action that will clear ALL categorization and cleansing data (categories, cleaned descriptions, etc.). This action **cannot be undone**.\\n\\nPlease confirm you want to proceed by replying with 'yes' or 'proceed'."
+        return "⚠️ **Confirmation Required**\n\nThis is a destructive action that will clear ALL categorization and cleansing data (categories, cleaned descriptions, etc.). This action **cannot be undone**.\n\nPlease confirm you want to proceed by replying with 'yes' or 'proceed'."
     logger.info("Confirmation received. Proceeding with full data reset.")
     reset_sql = f"UPDATE `{TABLE_ID}` SET category_l1 = NULL, category_l2 = NULL, description_cleaned = NULL, merchant_name_cleaned = NULL, is_recurring = NULL, categorization_method = NULL, categorization_update_timestamp = NULL WHERE TRUE;"
     try:
@@ -92,10 +92,10 @@ def reset_all_categorizations(tool_context: ToolContext, confirm: bool = False) 
         query_job.result()
         affected_rows = query_job.num_dml_affected_rows or 0
         logger.info("✅ Successfully reset %d rows.", affected_rows)
-        return f"✅ **Reset Complete**\\n\\nSuccessfully reset the categorization data for **{affected_rows}** transactions."
+        return f"✅ **Reset Complete**\n\nSuccessfully reset the categorization data for **{affected_rows}** transactions."
     except GoogleAPICallError as e:
         logger.error(f"❌ BigQuery error during reset operation: {e}")
-        return f"❌ **Error During Reset**\\nA BigQuery error occurred during the reset operation. Please check the logs. Error: {e}"
+        return f"❌ **Error During Reset**\nA BigQuery error occurred during the reset operation. Please check the logs. Error: {e}"
 
 def execute_custom_query(query: str) -> str:
     """
