@@ -452,7 +452,7 @@ def run_recurring_transaction_harmonization() -> str:
 
 # --- Phase 2 & 3: AI-Based Bulk & Recurring Tools ---
 
-def get_recurring_candidates_batch(tool_context: ToolContext, batch_size: int = 15) -> str:
+def get_recurring_candidates_batch(tool_context: ToolContext, batch_size: int = 50) -> str:
     """
     Fetches a batch of merchants that are potential candidates for being recurring.
     Gathers evidence like transaction counts, amount stability, and time intervals.
@@ -491,7 +491,7 @@ def get_recurring_candidates_batch(tool_context: ToolContext, batch_size: int = 
                     description_cleaned,
                     amount,
                     transaction_date
-                ) ORDER BY transaction_date DESC LIMIT 5
+                ) ORDER BY transaction_date DESC LIMIT 2
             ) AS example_transactions
         FROM TransactionIntervals
         GROUP BY 1, 2
@@ -569,7 +569,7 @@ def apply_bulk_recurring_flags(categorized_json_string: str) -> str:
         logger.error(f"❌ BigQuery error during bulk recurring flag update: {e}")
         return json.dumps({"status": "error", "message": str(e)})
 
-def get_merchant_batch_to_categorize(tool_context: ToolContext, batch_size: int = 50) -> str:
+def get_merchant_batch_to_categorize(tool_context: ToolContext, batch_size: int = 100) -> str:
     """
     Fetches a batch of the most frequent uncategorized merchants for efficient bulk processing.
     """
@@ -752,7 +752,7 @@ def apply_bulk_pattern_update(categorized_json_string: str) -> str:
 
 
 # --- Phase 4: Transaction-Level AI & Learning Tools ---
-def fetch_batch_for_ai_categorization(tool_context: ToolContext, batch_size: int = 250) -> str:
+def fetch_batch_for_ai_categorization(tool_context: ToolContext, batch_size: int = 350) -> str:
     """Fetches a batch of individual uncategorized transactions for detailed, row-by-row AI processing."""
     logger.info(f"Fetching batch for AI categorization with enriched context. Batch size: {batch_size}")
     fetch_sql = f"""

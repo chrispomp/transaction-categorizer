@@ -51,7 +51,7 @@ recurring_identification_loop = LoopAgent(
     name="recurring_identification_loop",
     description="This agent starts an AI-driven process to find and flag recurring transactions. It processes merchants in batches and provides real-time summaries.",
     sub_agents=[single_recurring_batch_agent],
-    max_iterations=10
+    max_iterations=20
 )
 
 single_merchant_batch_agent = LlmAgent(
@@ -74,7 +74,7 @@ merchant_categorization_loop = LoopAgent(
     name="merchant_categorization_loop",
     description="This agent starts an efficient, automated categorization by processing BATCHES of common uncategorized merchants, providing a summary for each batch.",
     sub_agents=[single_merchant_batch_agent],
-    max_iterations=10
+    max_iterations=20
 )
 
 single_pattern_batch_agent = LlmAgent(
@@ -85,7 +85,7 @@ single_pattern_batch_agent = LlmAgent(
     Your purpose is to perform one complete cycle of BATCH pattern-based transaction categorization.
 
     **Your process is a strict, three-step sequence:**
-    1.  **FETCH BATCH:** First, you MUST call `get_pattern_batch_to_categorize` to get a batch of up to 10 pattern groups.
+    1.  **FETCH BATCH:** First, you MUST call `get_pattern_batch_to_categorize` to get a batch of up to 20 pattern groups.
         - If the tool returns a "complete" status, you must stop and escalate.
     2.  **ANALYZE & UPDATE BATCH:** Analyze the JSON data for ALL patterns. For each one, you **MUST ONLY** use `category_l1` and `category_l2` from this valid list: {VALID_CATEGORIES_JSON_STR}.
         - **NON-NEGOTIABLE**: Any category not in this list will be rejected by the tool.
@@ -98,7 +98,7 @@ pattern_categorization_loop = LoopAgent(
     name="pattern_categorization_loop",
     description="This agent starts an advanced, batch-based categorization on common transaction description patterns, providing real-time summaries.",
     sub_agents=[single_pattern_batch_agent],
-    max_iterations=10
+    max_iterations=20
 )
 
 single_transaction_categorizer_agent = LlmAgent(
