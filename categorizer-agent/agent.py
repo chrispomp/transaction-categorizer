@@ -56,7 +56,7 @@ recurring_identification_loop = LoopAgent(
 
 single_merchant_batch_agent = LlmAgent(
     name="single_merchant_batch_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     tools=[get_merchant_batch_to_categorize, apply_bulk_merchant_update],
     instruction=f"""
     Your purpose is to perform one cycle of BATCH merchant-based transaction categorization.
@@ -75,7 +75,7 @@ merchant_categorization_loop = LoopAgent(
 
 single_pattern_batch_agent = LlmAgent(
     name="single_pattern_batch_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     tools=[get_pattern_batch_to_categorize, apply_bulk_pattern_update],
     instruction=f"""
     Your purpose is to perform one complete cycle of BATCH pattern-based transaction categorization.
@@ -98,7 +98,7 @@ pattern_categorization_loop = LoopAgent(
 
 single_transaction_categorizer_agent = LlmAgent(
     name="single_transaction_categorizer_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     tools=[fetch_batch_for_ai_categorization, update_categorizations_in_bigquery],
     instruction=f"""
     Your purpose is to perform one cycle of detailed, transaction-by-transaction categorization and report the result with enhanced detail.
@@ -122,7 +122,7 @@ transaction_categorization_loop = LoopAgent(
 # --- Root Orchestrator Agent ---
 root_agent = Agent(
     name="transaction_categorizer_orchestrator",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     tools=[
         audit_data_quality,
         reset_all_categorizations,
