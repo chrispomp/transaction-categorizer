@@ -135,100 +135,119 @@ def execute_custom_query(query: str) -> str:
 
 # --- Phase 1: Dynamic Rules-Based Tools ---
 
-def run_cleansing_and_dynamic_rules() -> str:
+def run_data_cleansing() -> str:
     """
-    Performs data cleansing and applies categorization rules dynamically
-    from the dedicated rules table in BigQuery. This enhanced version uses a two-pass
-    approach, first matching on merchant, then on description patterns for any remainder.
+    Cleanses the raw merchant and description fields for all transactions that haven't been cleaned yet.
+    This involves converting to uppercase and removing special characters.
     """
-    logger.info("Starting enhanced data cleansing and DYNAMIC rules-based categorization...")
-
-    sql_cleansing_and_rules = f"""
-    MERGE `{TABLE_ID}` AS T
+    logger.info("Starting data cleansing for all transactions...")
+    # This query will cleanse the raw fields for any transaction where the
+    # cleaned fields are currently NULL, ensuring it only runs once per row.
+    cleansing_sql = f"""
+    MERGE `{TABLE_ID}` T
     USING (
-        WITH
-        -- Step 1: Clean the raw description and merchant name for all uncategorized transactions.
-        CleansedData AS (
-            SELECT
-                transaction_id,
-                transaction_type,
-                TRIM(LOWER(REGEXP_REPLACE(REGEXP_REPLACE(REPLACE(IFNULL(description_raw, ''), '-', ''), r'[^a-zA-Z0-9\\\\s]', ' '), r'\\\\s+', ' '))) AS new_description_cleaned,
-                TRIM(LOWER(
-                    REGEXP_EXTRACT(
-                        REGEXP_REPLACE(REGEXP_REPLACE(REPLACE(IFNULL(merchant_name_raw, ''), '-', ''), r'[^a-zA-Z0-9\\\\s\\\\*#-]', ''), r'\\\\s+', ' '),
-                        r'^(?:sq\\\\s*\\\\*|pypl\\\\s*\\\\*|cl\\\\s*\\\\*|\\\\*\\\\s*)?([^*#-]+)'
-                    )
-                )) AS new_merchant_name_cleaned
-            FROM `{TABLE_ID}`
-            WHERE category_l1 IS NULL
-        ),
-        -- Step 2: Get all rules, deduplicated by identifier, type, and transaction_type to get the best one.
-        DeduplicatedRules AS (
-            SELECT
-                *,
-                ROW_NUMBER() OVER(PARTITION BY identifier, rule_type, transaction_type ORDER BY confidence_score DESC, last_updated_timestamp DESC) as rn
-            FROM `{RULES_TABLE_ID}`
-            WHERE is_active = TRUE -- Only use active rules
-        ),
-        -- Step 3: First pass categorization based on MERCHANT rules.
-        CategorizedByMerchant AS (
-            SELECT
-                cd.transaction_id,
-                cd.new_description_cleaned,
-                cd.new_merchant_name_cleaned,
-                rules.category_l1,
-                rules.category_l2,
-                'rules-based-merchant' AS method
-            FROM CleansedData cd
-            JOIN DeduplicatedRules rules
-                ON cd.new_merchant_name_cleaned = rules.identifier
-                AND cd.transaction_type = rules.transaction_type
-            WHERE rules.rn = 1 AND rules.rule_type = 'MERCHANT'
-        ),
-        -- Step 4: Second pass categorization based on DESCRIPTION rules for remaining transactions.
-        CategorizedByDescription AS (
-            SELECT
-                cd.transaction_id,
-                cd.new_description_cleaned,
-                cd.new_merchant_name_cleaned,
-                rules.category_l1,
-                rules.category_l2,
-                'rules-based-description' AS method
-            FROM CleansedData cd
-            LEFT JOIN CategorizedByMerchant cbm ON cd.transaction_id = cbm.transaction_id
-            JOIN DeduplicatedRules rules
-                ON STRPOS(cd.new_description_cleaned, rules.identifier) > 0 -- Use STRPOS for 'contains' logic
-                AND cd.transaction_type = rules.transaction_type
-            WHERE cbm.transaction_id IS NULL -- Only process those not caught by the merchant pass
-              AND rules.rn = 1
-              AND rules.rule_type = 'DESCRIPTION'
-        )
-        -- Step 5: Combine results from both passes
-        SELECT * FROM CategorizedByMerchant
-        UNION ALL
-        SELECT * FROM CategorizedByDescription
-
-    ) AS U
+        SELECT
+            transaction_id,
+            TRIM(UPPER(REGEXP_REPLACE(REGEXP_REPLACE(REPLACE(IFNULL(description_raw, ''), '-', ''), r'[^a-zA-Z0-9\\s]', ' '), r'\\s+', ' '))) AS new_description_cleaned,
+            TRIM(UPPER(
+                REGEXP_EXTRACT(
+                    REGEXP_REPLACE(REGEXP_REPLACE(REPLACE(IFNULL(merchant_name_raw, ''), '-', ''), r'[^a-zA-Z0-9\\s\\*#-]', ''), r'\\s+', ' '),
+                    r'^(?:SQ\\s*\\*|PYPL\\s*\\*|CL\\s*\\*|\\*\\s*)?([^*#-]+)'
+                )
+            )) AS new_merchant_name_cleaned
+        FROM `{TABLE_ID}`
+        WHERE description_cleaned IS NULL OR merchant_name_cleaned IS NULL
+    ) U
     ON T.transaction_id = U.transaction_id
     WHEN MATCHED THEN
         UPDATE SET
             T.description_cleaned = U.new_description_cleaned,
-            T.merchant_name_cleaned = U.new_merchant_name_cleaned,
+            T.merchant_name_cleaned = U.new_merchant_name_cleaned;
+    """
+    try:
+        job = bq_client.query(cleansing_sql)
+        job.result()
+        affected_rows = job.num_dml_affected_rows or 0
+        logger.info("✅ Data cleansing complete. %d rows affected.", affected_rows)
+        if affected_rows > 0:
+            return f"⚙️ **Data Cleansing Complete**\n\nSuccessfully cleansed merchant and description data for **{affected_rows}** new transactions."
+        else:
+            return "✅ **Data Cleansing Complete**\n\nAll transactions were already cleansed."
+    except GoogleAPICallError as e:
+        logger.error(f"❌ BigQuery error during data cleansing: {e}")
+        return f"❌ **Error During Data Cleansing**\nA BigQuery error occurred. Please check the logs. Error: {e}"
+
+
+def apply_categorization_rules() -> str:
+    """
+    Applies categorization rules from the dedicated rules table based on the cleaned
+    merchant and description fields. This uses a two-pass approach.
+    """
+    logger.info("Starting rules-based categorization...")
+    rules_sql = f"""
+    MERGE `{TABLE_ID}` T
+    USING (
+        -- Step 1: Get all active, deduplicated rules.
+        WITH DeduplicatedRules AS (
+            SELECT
+                *,
+                ROW_NUMBER() OVER(PARTITION BY identifier, rule_type, transaction_type ORDER BY confidence_score DESC, last_updated_timestamp DESC) as rn
+            FROM `{RULES_TABLE_ID}`
+            WHERE is_active = TRUE
+        ),
+        -- Step 2: First pass on MERCHANT rules.
+        CategorizedByMerchant AS (
+            SELECT
+                t.transaction_id,
+                rules.category_l1,
+                rules.category_l2,
+                'rules-based-merchant' AS method
+            FROM `{TABLE_ID}` t
+            JOIN DeduplicatedRules rules
+                ON t.merchant_name_cleaned = rules.identifier
+                AND t.transaction_type = rules.transaction_type
+            WHERE rules.rn = 1 AND rules.rule_type = 'MERCHANT'
+              AND t.category_l1 IS NULL -- Only categorize uncategorized
+        ),
+        -- Step 3: Second pass on DESCRIPTION rules for the remainder.
+        CategorizedByDescription AS (
+            SELECT
+                t.transaction_id,
+                rules.category_l1,
+                rules.category_l2,
+                'rules-based-description' AS method
+            FROM `{TABLE_ID}` t
+            LEFT JOIN CategorizedByMerchant cbm ON t.transaction_id = cbm.transaction_id
+            JOIN DeduplicatedRules rules
+                ON STRPOS(t.description_cleaned, rules.identifier) > 0
+                AND t.transaction_type = rules.transaction_type
+            WHERE cbm.transaction_id IS NULL -- Only those not caught by merchant pass
+              AND t.category_l1 IS NULL -- Only categorize uncategorized
+              AND rules.rn = 1
+              AND rules.rule_type = 'DESCRIPTION'
+        )
+        -- Step 4: Combine results
+        SELECT * FROM CategorizedByMerchant
+        UNION ALL
+        SELECT * FROM CategorizedByDescription
+    ) U
+    ON T.transaction_id = U.transaction_id
+    WHEN MATCHED THEN
+        UPDATE SET
             T.category_l1 = U.category_l1,
             T.category_l2 = U.category_l2,
             T.categorization_method = U.method,
             T.categorization_update_timestamp = CURRENT_TIMESTAMP();
     """
-
     try:
-        query_job = bq_client.query(sql_cleansing_and_rules)
-        query_job.result()
-        affected_rows = query_job.num_dml_affected_rows or 0
-        logger.info("✅ Successfully ran enhanced cleansing and dynamic rules engine. %d rows affected.", affected_rows)
-        return f"⚙️ **Cleansing & Dynamic Rules Engine Complete**\n\nSuccessfully processed the data. A total of **{affected_rows}** rows were cleansed and categorized based on the enhanced dynamic rules table (merchant and description)."
-    except (GoogleAPICallError, Exception) as e:
-        logger.error(f"❌ BigQuery error during enhanced cleansing and dynamic rules phase: {e}")
-        return f"❌ **Error During Cleansing & Rules**\nA BigQuery error occurred. Please check the logs. Error: {e}"
+        job = bq_client.query(rules_sql)
+        job.result()
+        affected_rows = job.num_dml_affected_rows or 0
+        logger.info("✅ Rules-based categorization complete. %d rows affected.", affected_rows)
+        return f"✅ **Rules Engine Complete**\n\nCategorized **{affected_rows}** transactions based on the dynamic rules table."
+    except GoogleAPICallError as e:
+        logger.error(f"❌ BigQuery error during rules-based categorization: {e}")
+        return f"❌ **Error During Rules Application**\nA BigQuery error occurred. Please check the logs. Error: {e}"
 
 
 from google.adk.agents import LlmAgent

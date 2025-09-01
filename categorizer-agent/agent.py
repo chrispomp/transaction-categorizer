@@ -11,7 +11,8 @@ from google.adk.tools import AgentTool
 from .config import VALID_CATEGORIES_JSON_STR
 from .tools import (
     audit_data_quality,
-    run_cleansing_and_dynamic_rules,
+    run_data_cleansing,
+    apply_categorization_rules,
     run_recurring_transaction_harmonization,
     reset_all_categorizations,
     execute_custom_query,
@@ -126,7 +127,8 @@ root_agent = Agent(
         reset_all_categorizations,
         execute_custom_query,
         review_and_resolve_rule_conflicts,
-        run_cleansing_and_dynamic_rules,
+        run_data_cleansing,
+        apply_categorization_rules,
         run_recurring_transaction_harmonization,
         harvest_new_rules,
         AgentTool(agent=recurring_identification_loop),
@@ -151,13 +153,14 @@ root_agent = Agent(
         - If the user chooses **1 (Audit)**, call `audit_data_quality` and present the results.
         - If the user chooses **2 (Run Categorization)**, you must execute the full, end-to-end categorization workflow. This involves calling a sequence of tools and agents in a specific order. You MUST follow this order and report on the outcome of each step before proceeding to the next.
             - **Step 1: Rule Conflict Review:** Call `review_and_resolve_rule_conflicts`.
-            - **Step 2: Cleansing & Rules Application:** Call `run_cleansing_and_dynamic_rules`.
-            - **Step 3: AI Recurring Identification:** Call the `recurring_identification_loop` agent.
-            - **Step 4: Harmonize Recurring:** Call `run_recurring_transaction_harmonization`.
-            - **Step 5: AI Merchant Categorization:** Call the `merchant_categorization_loop` agent.
-            - **Step 6: AI Pattern Categorization:** Call the `pattern_categorization_loop` agent.
-            - **Step 7: AI Transaction-Level Categorization:** Call the `transaction_categorization_loop` agent.
-            - **Step 8: Learn New Rules:** Call `harvest_new_rules` to learn from the AI's work.
+            - **Step 2: Data Cleansing:** Call `run_data_cleansing`.
+            - **Step 3: Rules Application:** Call `apply_categorization_rules`.
+            - **Step 4: AI Recurring Identification:** Call the `recurring_identification_loop` agent.
+            - **Step 5: Harmonize Recurring:** Call `run_recurring_transaction_harmonization`.
+            - **Step 6: AI Merchant Categorization:** Call the `merchant_categorization_loop` agent.
+            - **Step 7: AI Pattern Categorization:** Call the `pattern_categorization_loop` agent.
+            - **Step 8: AI Transaction-Level Categorization:** Call the `transaction_categorization_loop` agent.
+            - **Step 9: Learn New Rules:** Call `harvest_new_rules` to learn from the AI's work.
             - After the final step, provide a concluding summary.
         - If the user chooses **3 (Reset)**, call `reset_all_categorizations`. You must first call with `confirm=False`, show the user the warning, and only proceed if they explicitly confirm.
 
