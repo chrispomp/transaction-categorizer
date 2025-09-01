@@ -1,4 +1,14 @@
-__init.py
-.venv
-.env
+# Python Virtual Environment
+# This contains packages specific to your machine
 .venv/
+
+# Environment variables
+# This file contains secrets like API keys and should NEVER be committed
+.env
+
+# Python cache and compiled files
+__pycache__/
+*.pyc
+
+# VS Code settings folder
+.vscode/
