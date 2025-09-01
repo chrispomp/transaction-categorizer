@@ -240,18 +240,32 @@ def review_and_resolve_rule_conflicts() -> str:
     """
     logger.info("Starting rule review and conflict resolution...")
 
-    # Step 1: Ensure 'is_active' column exists in the rules table.
-    # This is idempotent; it will only add the column if it doesn't exist.
+    # Step 1: Ensure 'is_active' column exists and is populated.
     try:
-        alter_query = f"ALTER TABLE `{RULES_TABLE_ID}` ADD COLUMN is_active BOOL DEFAULT TRUE;"
-        bq_client.query(alter_query).result()
-        logger.info("Successfully ensured 'is_active' column exists in the rules table.")
+        # Attempt to add the column. This will fail if it already exists.
+        add_column_query = f"ALTER TABLE `{RULES_TABLE_ID}` ADD COLUMN is_active BOOL;"
+        bq_client.query(add_column_query).result()
+        logger.info("Successfully added 'is_active' column.")
     except GoogleAPICallError as e:
+        # Ignore the error if the column already exists, otherwise return an error.
         if "Duplicate column name is_active" in str(e):
-            logger.info("'is_active' column already exists.")
+            logger.info("'is_active' column already exists. No action needed.")
         else:
-            logger.error(f"Error preparing rules table for review: {e}")
+            logger.error(f"Error adding 'is_active' column: {e}")
             return f"❌ Error preparing rules table for review: {e}"
+
+    try:
+        # Backfill any NULL values for the is_active flag. This makes the operation idempotent.
+        update_query = f"UPDATE `{RULES_TABLE_ID}` SET is_active = TRUE WHERE is_active IS NULL;"
+        update_job = bq_client.query(update_query)
+        update_job.result()
+        if (update_job.num_dml_affected_rows or 0) > 0:
+             logger.info(f"Backfilled 'is_active' flag for {update_job.num_dml_affected_rows} rules.")
+        else:
+            logger.info("'is_active' column is fully populated.")
+    except GoogleAPICallError as e:
+        logger.error(f"Error populating 'is_active' column: {e}")
+        return f"❌ Error populating 'is_active' column: {e}"
 
     # Step 2: Find conflicting rules (same identifier, different categories).
     conflict_query = f"""
