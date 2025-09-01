@@ -248,7 +248,8 @@ def review_and_resolve_rule_conflicts() -> str:
         logger.info("Successfully added 'is_active' column.")
     except GoogleAPICallError as e:
         # Ignore the error if the column already exists, otherwise return an error.
-        if "Duplicate column name is_active" in str(e):
+        error_str = str(e).lower()
+        if ("duplicate column name" in error_str or "already exists" in error_str) and "is_active" in error_str:
             logger.info("'is_active' column already exists. No action needed.")
         else:
             logger.error(f"Error adding 'is_active' column: {e}")
