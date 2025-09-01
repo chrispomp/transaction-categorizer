@@ -1,3 +1,24 @@
-.venv
-.env
+# Byte-compiled / optimized files
+__pycache__/
+*.pyc
+
+# Virtual environments
 .venv/
+venv/
+env/
+
+# Environment variables
+.env
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Editor/IDE files
+.vscode/
+.idea/
+
+# Testing files
+.pytest_cache/
+.coverage
+htmlcov/
