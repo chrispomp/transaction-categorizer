@@ -133,9 +133,6 @@ def execute_custom_query(query: str) -> str:
 
 
 # --- Phase 1: Dynamic Rules-Based Tools ---
-# In tools.py
-
-# In tools.py
 
 def run_cleansing_and_dynamic_rules() -> str:
     """
