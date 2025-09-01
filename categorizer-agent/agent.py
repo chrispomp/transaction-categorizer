@@ -23,7 +23,8 @@ from .tools import (
     get_pattern_batch_to_categorize,
     apply_bulk_pattern_update,
     fetch_batch_for_ai_categorization,
-    update_categorizations_in_bigquery
+    update_categorizations_in_bigquery,
+    review_and_resolve_rule_conflicts,
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -116,53 +117,101 @@ transaction_categorization_loop = LoopAgent(
     max_iterations=50
 )
 
+# --- New Categorization Flow Agent ---
+# This new LoopAgent will orchestrate the entire categorization process end-to-end.
+
+# Define simple agents to wrap the tool calls
+rule_review_agent = Agent(
+    name="rule_review_agent",
+    model="gemini-2.5-flash",
+    tools=[review_and_resolve_rule_conflicts],
+    instruction="Call the `review_and_resolve_rule_conflicts` tool and report its output.",
+)
+
+cleansing_agent = Agent(
+    name="cleansing_agent",
+    model="gemini-2.5-flash",
+    tools=[run_cleansing_and_dynamic_rules],
+    instruction="Call the `run_cleansing_and_dynamic_rules` tool and report its output.",
+)
+
+harmonization_agent = Agent(
+    name="harmonization_agent",
+    model="gemini-2.5-flash",
+    tools=[run_recurring_transaction_harmonization],
+    instruction="Call the `run_recurring_transaction_harmonization` tool and report its output.",
+)
+
+rule_harvester_agent = Agent(
+    name="rule_harvester_agent",
+    model="gemini-2.5-flash",
+    tools=[harvest_new_rules],
+    instruction="Your job is to call the `harvest_new_rules` tool to learn from the AI's recent work. Report the result back to the user.",
+)
+
+categorization_flow_loop = LoopAgent(
+    name="categorization_flow_loop",
+    model="gemini-2.5-flash",
+    description="Runs the full, end-to-end categorization process. This includes data cleansing, rule-based categorization, AI-driven categorization, and learning new rules.",
+    sub_agents=[
+        AgentTool(agent=rule_review_agent),
+        AgentTool(agent=cleansing_agent),
+        AgentTool(agent=recurring_identification_loop),
+        AgentTool(agent=harmonization_agent),
+        AgentTool(agent=merchant_categorization_loop),
+        AgentTool(agent=pattern_categorization_loop),
+        AgentTool(agent=transaction_categorization_loop),
+        AgentTool(agent=rule_harvester_agent),
+    ],
+    max_iterations=1, # This loop runs once to execute the sequence of sub-agents.
+    instruction="""
+    You are orchestrating a multi-step financial transaction categorization process. Execute the following agents in this exact order and do not proceed to the next step until the current one is complete. Report on the outcome of each step.
+
+    **Workflow:**
+    1.  **`rule_review_agent`**: Resolve any conflicts in the existing rule set.
+    2.  **`cleansing_agent`**: Cleanse the data and apply all existing high-confidence rules.
+    3.  **`recurring_identification_loop`**: Identify and flag recurring transactions.
+    4.  **`harmonization_agent`**: Ensure recurring transactions from the same merchant have the same category.
+    5.  **`merchant_categorization_loop`**: Use AI to categorize transactions in bulk based on merchant names.
+    6.  **`pattern_categorization_loop`**: Use AI to categorize transactions in bulk based on description patterns.
+    7.  **`transaction_categorization_loop`**: Use AI to categorize any remaining individual transactions.
+    8.  **`rule_harvester_agent`**: Analyze the AI's work to create new rules for the future.
+
+    After the final step is complete, provide a concluding summary to the user.
+    """
+)
+
 # --- Root Orchestrator Agent ---
 root_agent = Agent(
     name="transaction_categorizer_orchestrator",
     model="gemini-2.5-flash",
     tools=[
         audit_data_quality,
-        run_cleansing_and_dynamic_rules,
-        run_recurring_transaction_harmonization,
         reset_all_categorizations,
         execute_custom_query,
-        harvest_new_rules,
-        AgentTool(agent=recurring_identification_loop),
-        AgentTool(agent=merchant_categorization_loop),
-        AgentTool(agent=pattern_categorization_loop),
-        AgentTool(agent=transaction_categorization_loop),
+        AgentTool(agent=categorization_flow_loop),
     ],
     instruction="""
-    You are an elite financial transaction data analyst 🤖. Your purpose is to guide the user through a multi-step transaction categorization process. Be clear, concise, proactive, and use markdown and emojis to make your responses easy to read.
+    You are an elite financial transaction data analyst 🤖. Your purpose is to help users categorize their financial transactions using a powerful and efficient workflow.
 
-    **Your Standard Workflow:**
-    1.  **Greeting & Options:** Start with a friendly greeting and present a numbered list of the main categorization steps as options for the user to choose from. The options should be:
-        1. Run a Data Quality Audit
-        2. Cleanse Data & Apply Rules
-        3. Identify Recurring Transactions (AI)
-        4. Harmonize Recurring Transactions
-        5. Bulk Categorize by Merchant (AI)
-        6. Bulk Categorize by Pattern (AI)
-        7. Categorize All Remaining Transactions (AI)
-        8. Learn New Rules from AI Categorization
-    
-    2.  **Await User Choice:** After presenting the options, wait for the user to select a step.
-    
-    3.  **Execute & Report:** Once the user chooses an option, execute the corresponding tool or agent (`audit_data_quality` for option 1, `run_cleansing_and_dynamic_rules` for 2, `recurring_identification_loop` for 3, etc.). Provide a clear summary of the results upon completion.
-    
-    4.  **Prompt for Next Step:** After a step is complete, prompt the user for the next action, reminding them of the logical next step in the workflow but also allowing them to choose any other option. For example, after the audit, say: "The audit is complete. The next logical step is to cleanse the data and apply existing rules. Shall I proceed with that, or would you like to choose another option?"
+    **Primary Workflow:**
+    1.  **Initial Greeting**: Unless the user asks a specific question, greet them with this exact message:
+        "Hello! I'm ready to help you categorize your financial transactions using a powerful and efficient workflow. 🚀
 
-    **AI Categorization Flow:**
-    - When the user selects an AI categorization step (like Bulk Categorize or Transactional Categorization), you must first confirm their choice.
-    - Before starting, you MUST say: "Great! I am now starting the automated agent. 🕵️‍♂️ This may take several minutes. **You will see real-time updates below as each batch is completed.** I will let you know when the process is finished."
-    - When the loop agent finishes, you MUST say: "🎉 **All Done!** The automated categorization is complete."
+        Please choose an option to begin:
 
-    **Learning New Rules:**
-    - After any AI categorization step is complete, you should proactively suggest running `harvest_new_rules`.
-    - Explain it by saying: "Now that the AI has processed the data, I can analyze its decisions to find high-confidence patterns. This will create new rules, making the agent smarter and faster for next time. Would you like me to proceed?"
+        1.  📊 **Audit Data Quality**: Get a high-level overview and identify issues in your data.
+        2.  ⚙️ **Run Categorization**: Cleanse, classify, and categorize your data using rules and AI.
+        3.  🔄 **Reset All Categorizations**: Clear all data cleansing and category assignments."
 
-    **Flexible Tools (Use when requested):**
-    - **Custom Queries:** The `execute_custom_query` tool is available for ad-hoc analysis. If the user asks a specific question about their data, formulate the correct SQL query and call this tool.
-    - **Resetting Data:** The `reset_all_categorizations` tool is destructive. Only use it if the user explicitly asks to "start over." First, call with `confirm=False`, present the warning, and only proceed if they confirm.
+    2.  **Executing User's Choice**:
+        - If the user chooses **1 (Audit)**, call the `audit_data_quality` tool and present the results.
+        - If the user chooses **2 (Run Categorization)**, call the `categorization_flow_loop` agent. Provide a brief intro before starting and a confirmation when it's complete.
+        - If the user chooses **3 (Reset)**, call the `reset_all_categorizations` tool. Since this is a destructive action, you must first call it with `confirm=False`, show the user the warning, and only proceed if they explicitly confirm.
+
+    3.  **Handling Follow-up Questions**: After completing a task, ask the user what they would like to do next.
+
+    **Ad-hoc Queries:**
+    - If the user asks a specific question about their data (e.g., "how many transactions from Starbucks?"), use the `execute_custom_query` tool to answer them.
     """
 )

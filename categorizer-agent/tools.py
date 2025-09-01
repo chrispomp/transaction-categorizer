@@ -9,6 +9,7 @@ from google.cloud import bigquery
 
 # ADK Core Components
 from google.adk.tools import ToolContext
+from google.adk.agents import LlmAgent
 
 # Import configurations from your config file
 from .config import (
@@ -137,21 +138,20 @@ def execute_custom_query(query: str) -> str:
 def run_cleansing_and_dynamic_rules() -> str:
     """
     Performs data cleansing and applies categorization rules dynamically
-    from the dedicated rules table in BigQuery. This version de-duplicates rules
-    and joins on both merchant and transaction type.
+    from the dedicated rules table in BigQuery. This enhanced version uses a two-pass
+    approach, first matching on merchant, then on description patterns for any remainder.
     """
-    logger.info("Starting data cleansing and DYNAMIC rules-based categorization...")
+    logger.info("Starting enhanced data cleansing and DYNAMIC rules-based categorization...")
 
-    # This SQL is updated to join on both merchant name and transaction type
-    # to prevent merge conflicts.
     sql_cleansing_and_rules = f"""
     MERGE `{TABLE_ID}` AS T
     USING (
         WITH
+        -- Step 1: Clean the raw description and merchant name for all uncategorized transactions.
         CleansedData AS (
             SELECT
                 transaction_id,
-                transaction_type, -- Added transaction_type
+                transaction_type,
                 TRIM(LOWER(REGEXP_REPLACE(REGEXP_REPLACE(REPLACE(IFNULL(description_raw, ''), '-', ''), r'[^a-zA-Z0-9\\\\s]', ' '), r'\\\\s+', ' '))) AS new_description_cleaned,
                 TRIM(LOWER(
                     REGEXP_EXTRACT(
@@ -162,33 +162,52 @@ def run_cleansing_and_dynamic_rules() -> str:
             FROM `{TABLE_ID}`
             WHERE category_l1 IS NULL
         ),
+        -- Step 2: Get all rules, deduplicated by identifier, type, and transaction_type to get the best one.
         DeduplicatedRules AS (
             SELECT
                 *,
                 ROW_NUMBER() OVER(PARTITION BY identifier, rule_type, transaction_type ORDER BY confidence_score DESC, last_updated_timestamp DESC) as rn
             FROM `{RULES_TABLE_ID}`
-            WHERE rule_type = 'MERCHANT'
+            WHERE is_active = TRUE -- Only use active rules
         ),
-        CategorizedByRule AS (
+        -- Step 3: First pass categorization based on MERCHANT rules.
+        CategorizedByMerchant AS (
             SELECT
                 cd.transaction_id,
                 cd.new_description_cleaned,
                 cd.new_merchant_name_cleaned,
                 rules.category_l1,
-                rules.category_l2
+                rules.category_l2,
+                'rules-based-merchant' AS method
             FROM CleansedData cd
             JOIN DeduplicatedRules rules
                 ON cd.new_merchant_name_cleaned = rules.identifier
-                AND cd.transaction_type = rules.transaction_type -- Added this line for a more specific join
-            WHERE rules.rn = 1
+                AND cd.transaction_type = rules.transaction_type
+            WHERE rules.rn = 1 AND rules.rule_type = 'MERCHANT'
+        ),
+        -- Step 4: Second pass categorization based on DESCRIPTION rules for remaining transactions.
+        CategorizedByDescription AS (
+            SELECT
+                cd.transaction_id,
+                cd.new_description_cleaned,
+                cd.new_merchant_name_cleaned,
+                rules.category_l1,
+                rules.category_l2,
+                'rules-based-description' AS method
+            FROM CleansedData cd
+            LEFT JOIN CategorizedByMerchant cbm ON cd.transaction_id = cbm.transaction_id
+            JOIN DeduplicatedRules rules
+                ON STRPOS(cd.new_description_cleaned, rules.identifier) > 0 -- Use STRPOS for 'contains' logic
+                AND cd.transaction_type = rules.transaction_type
+            WHERE cbm.transaction_id IS NULL -- Only process those not caught by the merchant pass
+              AND rules.rn = 1
+              AND rules.rule_type = 'DESCRIPTION'
         )
-        SELECT
-            transaction_id,
-            new_description_cleaned,
-            new_merchant_name_cleaned,
-            category_l1,
-            category_l2
-        FROM CategorizedByRule
+        -- Step 5: Combine results from both passes
+        SELECT * FROM CategorizedByMerchant
+        UNION ALL
+        SELECT * FROM CategorizedByDescription
+
     ) AS U
     ON T.transaction_id = U.transaction_id
     WHEN MATCHED THEN
@@ -197,7 +216,7 @@ def run_cleansing_and_dynamic_rules() -> str:
             T.merchant_name_cleaned = U.new_merchant_name_cleaned,
             T.category_l1 = U.category_l1,
             T.category_l2 = U.category_l2,
-            T.categorization_method = 'dynamic-rules-based',
+            T.categorization_method = U.method,
             T.categorization_update_timestamp = CURRENT_TIMESTAMP();
     """
 
@@ -205,11 +224,111 @@ def run_cleansing_and_dynamic_rules() -> str:
         query_job = bq_client.query(sql_cleansing_and_rules)
         query_job.result()
         affected_rows = query_job.num_dml_affected_rows or 0
-        logger.info("✅ Successfully ran cleansing and dynamic rules engine. %d rows affected.", affected_rows)
-        return f"⚙️ **Cleansing & Dynamic Rules Engine Complete**\\n\\nSuccessfully processed the data. A total of **{affected_rows}** rows were cleansed and categorized based on the dynamic rules table."
+        logger.info("✅ Successfully ran enhanced cleansing and dynamic rules engine. %d rows affected.", affected_rows)
+        return f"⚙️ **Cleansing & Dynamic Rules Engine Complete**\n\nSuccessfully processed the data. A total of **{affected_rows}** rows were cleansed and categorized based on the enhanced dynamic rules table (merchant and description)."
     except (GoogleAPICallError, Exception) as e:
-        logger.error(f"❌ BigQuery error during cleansing and dynamic rules phase: {e}")
-        return f"❌ **Error During Cleansing & Rules**\\nA BigQuery error occurred. Please check the logs. Error: {e}"
+        logger.error(f"❌ BigQuery error during enhanced cleansing and dynamic rules phase: {e}")
+        return f"❌ **Error During Cleansing & Rules**\nA BigQuery error occurred. Please check the logs. Error: {e}"
+
+
+from google.adk.agents import LlmAgent
+
+def review_and_resolve_rule_conflicts() -> str:
+    """
+    Reviews the categorization rules for conflicts, uses an LLM to resolve them,
+    and updates the rules table to deactivate incorrect entries.
+    """
+    logger.info("Starting rule review and conflict resolution...")
+
+    # Step 1: Ensure 'is_active' column exists in the rules table.
+    # This is idempotent; it will only add the column if it doesn't exist.
+    try:
+        alter_query = f"ALTER TABLE `{RULES_TABLE_ID}` ADD COLUMN is_active BOOL DEFAULT TRUE;"
+        bq_client.query(alter_query).result()
+        logger.info("Successfully ensured 'is_active' column exists in the rules table.")
+    except GoogleAPICallError as e:
+        if "Duplicate column name is_active" in str(e):
+            logger.info("'is_active' column already exists.")
+        else:
+            logger.error(f"Error preparing rules table for review: {e}")
+            return f"❌ Error preparing rules table for review: {e}"
+
+    # Step 2: Find conflicting rules (same identifier, different categories).
+    conflict_query = f"""
+        WITH ConflictingRules AS (
+            SELECT
+                identifier,
+                rule_type,
+                transaction_type,
+                ARRAY_AGG(STRUCT(rule_id, category_l1, category_l2, confidence_score, last_updated_timestamp)) AS rules
+            FROM `{RULES_TABLE_ID}`
+            WHERE is_active = TRUE
+            GROUP BY 1, 2, 3
+            HAVING COUNT(DISTINCT (category_l1, category_l2)) > 1
+        )
+        SELECT identifier, rule_type, transaction_type, rules FROM ConflictingRules
+    """
+    try:
+        conflicts_df = bq_client.query(conflict_query).to_dataframe()
+        if conflicts_df.empty:
+            return "✅ **Rule Review Complete**: No conflicting rules found."
+        logger.info(f"Found {len(conflicts_df)} conflicting rule sets to resolve.")
+    except GoogleAPICallError as e:
+        logger.error(f"Error finding conflicting rules: {e}")
+        return f"❌ Error finding conflicting rules: {e}"
+
+    # Step 3: Use a temporary, in-tool LLM agent to resolve conflicts.
+    conflict_resolver_agent = LlmAgent(
+        model="gemini-2.5-flash",
+        instruction="""
+        You are a data analyst specializing in financial transaction categorization.
+        You will be given a JSON object representing a set of conflicting rules for a single identifier.
+        Your task is to analyze the rules and decide which one is the most correct.
+        Consider the confidence_score (higher is better) and last_updated_timestamp (more recent is better).
+        You MUST respond with a valid JSON object with two keys:
+        - "rule_to_keep": The rule_id of the single rule that should be kept active.
+        - "rules_to_deactivate": A list of all other rule_ids that should be deactivated.
+        """
+    )
+
+    rules_to_deactivate = []
+    for conflict in conflicts_df.to_dict('records'):
+        prompt = f"Please resolve the following conflict:\n{json.dumps(conflict, indent=2, default=str)}"
+        try:
+            response_str = conflict_resolver_agent.invoke(prompt)
+            # Clean the response string before parsing
+            cleaned_response = response_str.strip().replace('```json', '').replace('```', '')
+            resolution = json.loads(cleaned_response)
+            if 'rules_to_deactivate' in resolution and isinstance(resolution['rules_to_deactivate'], list):
+                rules_to_deactivate.extend(resolution['rules_to_deactivate'])
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            logger.error(f"Error parsing LLM response for conflict resolution: {e}. Response: '{response_str}'")
+            continue # Skip this conflict if LLM fails to provide a valid resolution
+
+    # Step 4: Apply resolutions by deactivating incorrect rules.
+    if not rules_to_deactivate:
+        return "⚠️ **Rule Review Complete**: Found conflicts, but was unable to generate resolutions. Please review rules manually."
+
+    # Use a parameterized query to prevent SQL injection, even with internal data.
+    update_query = f"""
+        UPDATE `{RULES_TABLE_ID}`
+        SET is_active = FALSE, last_updated_timestamp = CURRENT_TIMESTAMP()
+        WHERE rule_id IN UNNEST(@rule_ids)
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ArrayQueryParameter("rule_ids", "STRING", rules_to_deactivate)
+        ]
+    )
+    try:
+        update_job = bq_client.query(update_query, job_config=job_config)
+        update_job.result()
+        deactivated_count = update_job.num_dml_affected_rows or 0
+        logger.info(f"Successfully deactivated {deactivated_count} conflicting rules.")
+        return f"✅ **Rule Review Complete**: Deactivated {deactivated_count} conflicting or redundant rules to improve consistency."
+    except GoogleAPICallError as e:
+        logger.error(f"Error deactivating conflicting rules: {e}")
+        return f"❌ Error applying rule resolutions: {e}"
 
 
 def run_recurring_transaction_harmonization() -> str:
