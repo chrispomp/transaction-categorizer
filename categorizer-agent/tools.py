@@ -138,7 +138,7 @@ def execute_custom_query(query: str) -> str:
 def run_data_cleansing() -> str:
     """
     Cleanses the raw merchant and description fields for all transactions that haven't been cleaned yet.
-    This involves converting to lowercase and removing special characters.
+    This involves converting to uppercase and removing special characters.
     """
     logger.info("Starting data cleansing for all transactions...")
     # This query will cleanse the raw fields for any transaction where the
@@ -148,8 +148,8 @@ def run_data_cleansing() -> str:
     USING (
         SELECT
             transaction_id,
-            TRIM(LOWER(REGEXP_REPLACE(REGEXP_REPLACE(REPLACE(IFNULL(description_raw, ''), '-', ''), r'[^a-zA-Z0-9\\s]', ' '), r'\\s+', ' '))) AS new_description_cleaned,
-            TRIM(LOWER(
+            TRIM(UPPER(REGEXP_REPLACE(REGEXP_REPLACE(REPLACE(IFNULL(description_raw, ''), '-', ''), r'[^a-zA-Z0-9\\s]', ' '), r'\\s+', ' '))) AS new_description_cleaned,
+            TRIM(UPPER(
                 REGEXP_EXTRACT(
                     REGEXP_REPLACE(REGEXP_REPLACE(REPLACE(IFNULL(merchant_name_raw, ''), '-', ''), r'[^a-zA-Z0-9\\s\\*#-]', ''), r'\\s+', ' '),
                     r'^(?:SQ\\s*\\*|PYPL\\s*\\*|CL\\s*\\*|\\*\\s*)?([^*#-]+)'
@@ -180,14 +180,28 @@ def run_data_cleansing() -> str:
 
 def apply_categorization_rules() -> str:
     """
-    Applies categorization rules from the dedicated rules table based on the cleaned
-    merchant and description fields. This uses a two-pass approach.
+    Applies categorization rules from the dedicated rules table.
+    Rules can set categories (l1/l2) and the is_recurring flag.
+    Uses a two-pass approach: first MERCHANT, then PATTERN.
     """
-    logger.info("Starting rules-based categorization...")
+    logger.info("Starting enhanced rules-based categorization...")
+
+    # Idempotently add the is_recurring_rule column if it doesn't exist.
+    try:
+        add_column_query = f"ALTER TABLE `{RULES_TABLE_ID}` ADD COLUMN is_recurring_rule BOOL;"
+        bq_client.query(add_column_query).result()
+        logger.info("Successfully added 'is_recurring_rule' column to rules table.")
+    except GoogleAPICallError as e:
+        error_str = str(e).lower()
+        if ("duplicate column name" in error_str or "already exists" in error_str) and "is_recurring_rule" in error_str:
+            logger.info("'is_recurring_rule' column already exists. No action needed.")
+        else:
+            logger.error(f"Error adding 'is_recurring_rule' column: {e}")
+            return f"❌ Error preparing rules table for extended rules: {e}"
+
     rules_sql = f"""
     MERGE `{TABLE_ID}` T
     USING (
-        -- Step 1: Get all active, deduplicated rules.
         WITH DeduplicatedRules AS (
             SELECT
                 *,
@@ -195,47 +209,47 @@ def apply_categorization_rules() -> str:
             FROM `{RULES_TABLE_ID}`
             WHERE is_active = TRUE
         ),
-        -- Step 2: First pass on MERCHANT rules.
         CategorizedByMerchant AS (
             SELECT
                 t.transaction_id,
                 rules.category_l1,
                 rules.category_l2,
+                rules.is_recurring_rule,
                 'rules-based-merchant' AS method
             FROM `{TABLE_ID}` t
             JOIN DeduplicatedRules rules
                 ON t.merchant_name_cleaned = rules.identifier
                 AND t.transaction_type = rules.transaction_type
             WHERE rules.rn = 1 AND rules.rule_type = 'MERCHANT'
-              AND t.category_l1 IS NULL -- Only categorize uncategorized
+              AND t.category_l1 IS NULL
         ),
-        -- Step 3: Second pass on DESCRIPTION rules for the remainder.
-        CategorizedByDescription AS (
+        CategorizedByPattern AS (
             SELECT
                 t.transaction_id,
                 rules.category_l1,
                 rules.category_l2,
-                'rules-based-description' AS method
+                rules.is_recurring_rule,
+                'rules-based-pattern' AS method
             FROM `{TABLE_ID}` t
             LEFT JOIN CategorizedByMerchant cbm ON t.transaction_id = cbm.transaction_id
             JOIN DeduplicatedRules rules
                 ON STRPOS(t.description_cleaned, rules.identifier) > 0
                 AND t.transaction_type = rules.transaction_type
-            WHERE cbm.transaction_id IS NULL -- Only those not caught by merchant pass
-              AND t.category_l1 IS NULL -- Only categorize uncategorized
+            WHERE cbm.transaction_id IS NULL
+              AND t.category_l1 IS NULL
               AND rules.rn = 1
-              AND rules.rule_type = 'DESCRIPTION'
+              AND rules.rule_type = 'PATTERN'
         )
-        -- Step 4: Combine results
         SELECT * FROM CategorizedByMerchant
         UNION ALL
-        SELECT * FROM CategorizedByDescription
+        SELECT * FROM CategorizedByPattern
     ) U
     ON T.transaction_id = U.transaction_id
     WHEN MATCHED THEN
         UPDATE SET
             T.category_l1 = U.category_l1,
             T.category_l2 = U.category_l2,
+            T.is_recurring = COALESCE(U.is_recurring_rule, T.is_recurring),
             T.categorization_method = U.method,
             T.categorization_update_timestamp = CURRENT_TIMESTAMP();
     """
@@ -243,8 +257,8 @@ def apply_categorization_rules() -> str:
         job = bq_client.query(rules_sql)
         job.result()
         affected_rows = job.num_dml_affected_rows or 0
-        logger.info("✅ Rules-based categorization complete. %d rows affected.", affected_rows)
-        return f"✅ **Rules Engine Complete**\n\nCategorized **{affected_rows}** transactions based on the dynamic rules table."
+        logger.info("✅ Enhanced rules-based categorization complete. %d rows affected.", affected_rows)
+        return f"✅ **Rules Engine Complete**\n\nCategorized and updated **{affected_rows}** transactions based on the enhanced dynamic rules table."
     except GoogleAPICallError as e:
         logger.error(f"❌ BigQuery error during rules-based categorization: {e}")
         return f"❌ **Error During Rules Application**\nA BigQuery error occurred. Please check the logs. Error: {e}"
@@ -811,29 +825,32 @@ def update_categorizations_in_bigquery(categorized_json_string: str) -> str:
 
 def harvest_new_rules() -> str:
     """
-    Identifies high-confidence categories from AI processing and saves them as new rules
-    for future use, making the agent smarter over time.
+    Identifies high-confidence categories from AI processing for both MERCHANTS and PATTERNS
+    and saves them as new rules for future use. It also learns the is_recurring status.
     """
-    logger.info("Harvesting new rules from AI categorizations...")
-    
-    harvest_sql = f"""
+    logger.info("Harvesting new merchant and pattern rules from AI categorizations...")
+
+    # --- Part 1: Harvest MERCHANT rules ---
+    harvest_merchants_sql = f"""
     MERGE `{RULES_TABLE_ID}` R
     USING (
-        -- Find merchants consistently categorized by the AI
+        -- Find merchants consistently categorized by the AI, now also considering recurring status
         SELECT
-            merchant_name_cleaned,
+            merchant_name_cleaned AS identifier,
             transaction_type,
             category_l1,
             category_l2,
+            -- Determine if the rule should set the recurring flag
+            LOGICAL_AND(IFNULL(is_recurring, FALSE)) AS is_recurring_rule,
             COUNT(transaction_id) AS confidence_score
         FROM `{TABLE_ID}`
         WHERE categorization_method IN ('llm-bulk-merchant-based', 'llm-transaction-based')
-            AND merchant_name_cleaned IS NOT NULL
+            AND merchant_name_cleaned IS NOT NULL AND merchant_name_cleaned != ''
         GROUP BY 1, 2, 3, 4
-        -- Only create rules for high-confidence patterns (e.g., seen at least 5 times)
-        HAVING COUNT(transaction_id) >= 5
+        -- Only create rules for high-confidence patterns (e.g., seen at least 3 times)
+        HAVING COUNT(transaction_id) >= 3
     ) AS NewRules
-    ON R.identifier = NewRules.merchant_name_cleaned
+    ON R.identifier = NewRules.identifier
         AND R.rule_type = 'MERCHANT'
         AND R.transaction_type = NewRules.transaction_type
     -- If a rule for this merchant already exists, update it if the new one is more confident
@@ -841,30 +858,88 @@ def harvest_new_rules() -> str:
         UPDATE SET
             category_l1 = NewRules.category_l1,
             category_l2 = NewRules.category_l2,
+            is_recurring_rule = NewRules.is_recurring_rule,
             confidence_score = NewRules.confidence_score,
             last_updated_timestamp = CURRENT_TIMESTAMP()
     -- If no rule exists, insert a new one
     WHEN NOT MATCHED THEN
-        INSERT (rule_id, rule_type, identifier, transaction_type, category_l1, category_l2, confidence_score, created_timestamp, last_updated_timestamp)
+        INSERT (rule_id, rule_type, identifier, transaction_type, category_l1, category_l2, is_recurring_rule, confidence_score, created_timestamp, last_updated_timestamp, is_active)
         VALUES (
             GENERATE_UUID(),
             'MERCHANT',
-            NewRules.merchant_name_cleaned,
+            NewRules.identifier,
             NewRules.transaction_type,
             NewRules.category_l1,
             NewRules.category_l2,
+            NewRules.is_recurring_rule,
             NewRules.confidence_score,
             CURRENT_TIMESTAMP(),
-            CURRENT_TIMESTAMP()
+            CURRENT_TIMESTAMP(),
+            TRUE
         );
     """
+
+    # --- Part 2: Harvest PATTERN rules ---
+    harvest_patterns_sql = f"""
+    MERGE `{RULES_TABLE_ID}` R
+    USING (
+        -- Find description patterns consistently categorized by the AI
+        SELECT
+            SUBSTR(description_cleaned, 1, 40) AS identifier,
+            transaction_type,
+            category_l1,
+            category_l2,
+            LOGICAL_AND(IFNULL(is_recurring, FALSE)) AS is_recurring_rule,
+            COUNT(transaction_id) AS confidence_score
+        FROM `{TABLE_ID}`
+        WHERE categorization_method IN ('llm-bulk-pattern-based', 'llm-transaction-based')
+            AND description_cleaned IS NOT NULL AND description_cleaned != ''
+        GROUP BY 1, 2, 3, 4
+        -- Only create rules for high-confidence patterns (e.g., seen at least 5 times)
+        HAVING COUNT(transaction_id) >= 5
+    ) AS NewRules
+    ON R.identifier = NewRules.identifier
+        AND R.rule_type = 'PATTERN'
+        AND R.transaction_type = NewRules.transaction_type
+    WHEN MATCHED AND NewRules.confidence_score > R.confidence_score THEN
+        UPDATE SET
+            category_l1 = NewRules.category_l1,
+            category_l2 = NewRules.category_l2,
+            is_recurring_rule = NewRules.is_recurring_rule,
+            confidence_score = NewRules.confidence_score,
+            last_updated_timestamp = CURRENT_TIMESTAMP()
+    WHEN NOT MATCHED THEN
+        INSERT (rule_id, rule_type, identifier, transaction_type, category_l1, category_l2, is_recurring_rule, confidence_score, created_timestamp, last_updated_timestamp, is_active)
+        VALUES (
+            GENERATE_UUID(),
+            'PATTERN',
+            NewRules.identifier,
+            NewRules.transaction_type,
+            NewRules.category_l1,
+            NewRules.category_l2,
+            NewRules.is_recurring_rule,
+            NewRules.confidence_score,
+            CURRENT_TIMESTAMP(),
+            CURRENT_TIMESTAMP(),
+            TRUE
+        );
+    """
+
     try:
-        harvest_job = bq_client.query(harvest_sql)
-        harvest_job.result()
-        new_rules_count = harvest_job.num_dml_affected_rows or 0
-        if new_rules_count > 0:
-            logger.info("✅ Successfully harvested %d new rules.", new_rules_count)
-            return f"🧠 **Learning Complete**: I've analyzed the recent AI categorizations and created or updated **{new_rules_count}** new high-confidence rules. The agent is now smarter for the next run!"
+        # Execute both merge statements
+        merchant_job = bq_client.query(harvest_merchants_sql)
+        merchant_job.result()
+        merchant_rows = merchant_job.num_dml_affected_rows or 0
+
+        pattern_job = bq_client.query(harvest_patterns_sql)
+        pattern_job.result()
+        pattern_rows = pattern_job.num_dml_affected_rows or 0
+
+        total_rows = merchant_rows + pattern_rows
+
+        if total_rows > 0:
+            logger.info("✅ Successfully harvested %d new rules (%d merchant, %d pattern).", total_rows, merchant_rows, pattern_rows)
+            return f"🧠 **Learning Complete**: I've analyzed the recent AI categorizations and created or updated **{total_rows}** new high-confidence rules ({merchant_rows} merchant-based, {pattern_rows} pattern-based). The agent is now smarter for the next run!"
         else:
             logger.info("No new high-confidence rules to harvest.")
             return "🧠 **Learning Complete**: No new patterns met the confidence threshold to be saved as rules at this time."

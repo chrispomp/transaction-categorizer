@@ -147,8 +147,7 @@ root_agent = Agent(
 
         1.  📊 **Audit Data Quality**: Get a high-level overview and identify issues in your data.
         2.  ⚙️ **Run Categorization**: Cleanse, classify, and categorize your data using rules and AI.
-        3.  🔎 **Conduct Custom Research**: Analyze the data with natural language prompts.
-        4.  🔄 **Reset All Categorizations**: Clear all data cleansing and category assignments."
+        3.  🔄 **Reset All Categorizations**: Clear all data cleansing and category assignments."
 
     2.  **Executing User's Choice**:
         - If the user chooses **1 (Audit)**, call `audit_data_quality` and present the results.
