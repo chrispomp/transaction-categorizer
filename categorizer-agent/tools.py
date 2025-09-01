@@ -452,7 +452,7 @@ def run_recurring_transaction_harmonization() -> str:
 
 # --- Phase 2 & 3: AI-Based Bulk & Recurring Tools ---
 
-def get_recurring_candidates_batch(tool_context: ToolContext, batch_size: int = 50) -> str:
+def get_recurring_candidates_batch(tool_context: ToolContext, batch_size: int = 200) -> str:
     """
     Fetches a batch of merchants that are potential candidates for being recurring.
     Gathers evidence like transaction counts, amount stability, and time intervals.
