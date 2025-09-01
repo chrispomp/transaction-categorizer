@@ -77,7 +77,7 @@ def audit_data_quality() -> str:
     return results_markdown
 
 
-def reset_all_categorizations(_tool_context: ToolContext, confirm: bool = False) -> str:
+def reset_all_categorizations(confirm: bool = False) -> str:
     """
     A destructive tool to reset all categorization and cleansing fields in the table.
     Requires explicit confirmation to proceed.
