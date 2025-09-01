@@ -1,3 +1,5 @@
+# tools.py
+
 from __future__ import annotations
 import json
 import logging
@@ -131,13 +133,20 @@ def execute_custom_query(query: str) -> str:
 
 
 # --- Phase 1: Dynamic Rules-Based Tools ---
+# In tools.py
+
+# In tools.py
+
 def run_cleansing_and_dynamic_rules() -> str:
     """
     Performs data cleansing and applies categorization rules dynamically
-    from the dedicated rules table in BigQuery.
+    from the dedicated rules table in BigQuery. This version de-duplicates rules
+    and joins on both merchant and transaction type.
     """
     logger.info("Starting data cleansing and DYNAMIC rules-based categorization...")
 
+    # This SQL is updated to join on both merchant name and transaction type
+    # to prevent merge conflicts.
     sql_cleansing_and_rules = f"""
     MERGE `{TABLE_ID}` AS T
     USING (
@@ -145,6 +154,7 @@ def run_cleansing_and_dynamic_rules() -> str:
         CleansedData AS (
             SELECT
                 transaction_id,
+                transaction_type, -- Added transaction_type
                 TRIM(LOWER(REGEXP_REPLACE(REGEXP_REPLACE(REPLACE(IFNULL(description_raw, ''), '-', ''), r'[^a-zA-Z0-9\\\\s]', ' '), r'\\\\s+', ' '))) AS new_description_cleaned,
                 TRIM(LOWER(
                     REGEXP_EXTRACT(
@@ -153,6 +163,14 @@ def run_cleansing_and_dynamic_rules() -> str:
                     )
                 )) AS new_merchant_name_cleaned
             FROM `{TABLE_ID}`
+            WHERE category_l1 IS NULL
+        ),
+        DeduplicatedRules AS (
+            SELECT
+                *,
+                ROW_NUMBER() OVER(PARTITION BY identifier, rule_type, transaction_type ORDER BY confidence_score DESC, last_updated_timestamp DESC) as rn
+            FROM `{RULES_TABLE_ID}`
+            WHERE rule_type = 'MERCHANT'
         ),
         CategorizedByRule AS (
             SELECT
@@ -162,8 +180,10 @@ def run_cleansing_and_dynamic_rules() -> str:
                 rules.category_l1,
                 rules.category_l2
             FROM CleansedData cd
-            JOIN `{RULES_TABLE_ID}` rules
-                ON cd.new_merchant_name_cleaned = rules.identifier AND rules.rule_type = 'MERCHANT'
+            JOIN DeduplicatedRules rules
+                ON cd.new_merchant_name_cleaned = rules.identifier
+                AND cd.transaction_type = rules.transaction_type -- Added this line for a more specific join
+            WHERE rules.rn = 1
         )
         SELECT
             transaction_id,
@@ -174,7 +194,7 @@ def run_cleansing_and_dynamic_rules() -> str:
         FROM CategorizedByRule
     ) AS U
     ON T.transaction_id = U.transaction_id
-    WHEN MATCHED AND T.category_l1 IS NULL THEN
+    WHEN MATCHED THEN
         UPDATE SET
             T.description_cleaned = U.new_description_cleaned,
             T.merchant_name_cleaned = U.new_merchant_name_cleaned,
@@ -264,18 +284,22 @@ def run_recurring_transaction_harmonization() -> str:
 
 
 # --- Phase 2 & 3: AI-Based Bulk & Recurring Tools ---
+
 def get_recurring_candidates_batch(tool_context: ToolContext, batch_size: int = 15) -> str:
     """
     Fetches a batch of merchants that are potential candidates for being recurring.
     Gathers evidence like transaction counts, amount stability, and time intervals.
     """
     logger.info(f"Fetching batch of {batch_size} recurring merchant candidates...")
+    
     query = f"""
         WITH TransactionIntervals AS (
             SELECT
                 merchant_name_cleaned,
                 transaction_type,
                 transaction_id,
+                description_cleaned,
+                amount,
                 transaction_date,
                 DATE_DIFF(
                     transaction_date,
@@ -284,32 +308,27 @@ def get_recurring_candidates_batch(tool_context: ToolContext, batch_size: int = 
                 ) as days_since_last_txn
             FROM `{TABLE_ID}`
             WHERE (is_recurring IS NULL OR is_recurring = FALSE)
-                AND merchant_name_cleaned IS NOT NULL AND merchant_name_cleaned != ''
-                AND transaction_type = 'Debit'
-        ),
-        MerchantStats AS (
-            SELECT
-                t.merchant_name_cleaned,
-                t.transaction_type,
-                COUNT(t.transaction_id) as transaction_count,
-                ARRAY_AGG(ti.days_since_last_txn IGNORE NULLS) AS transaction_intervals_days,
-                LOGICAL_OR(REGEXP_CONTAINS(LOWER(IFNULL(t.description_cleaned, '')), r'monthly|weekly|annual|subscription|membership|recurring|plan')) AS has_recurring_keywords,
-                STDDEV(ABS(t.amount)) as stddev_amount,
-                AVG(ABS(t.amount)) as avg_amount,
-                ARRAY_AGG(
-                    STRUCT(
-                        t.description_cleaned,
-                        t.amount,
-                        t.transaction_date
-                    ) ORDER BY t.transaction_date DESC LIMIT 5
-                ) AS example_transactions
-            FROM `{TABLE_ID}` t
-            JOIN TransactionIntervals ti ON t.transaction_id = ti.transaction_id
-            GROUP BY 1, 2
-            HAVING COUNT(t.transaction_id) >= 3
+              AND merchant_name_cleaned IS NOT NULL AND merchant_name_cleaned != ''
+              AND transaction_type = 'Debit'
         )
-        SELECT *
-        FROM MerchantStats
+        SELECT
+            merchant_name_cleaned,
+            transaction_type,
+            COUNT(transaction_id) as transaction_count,
+            ARRAY_AGG(days_since_last_txn IGNORE NULLS) AS transaction_intervals_days,
+            LOGICAL_OR(REGEXP_CONTAINS(LOWER(IFNULL(description_cleaned, '')), r'monthly|weekly|annual|subscription|membership|recurring|plan')) AS has_recurring_keywords,
+            STDDEV(ABS(amount)) as stddev_amount,
+            AVG(ABS(amount)) as avg_amount,
+            ARRAY_AGG(
+                STRUCT(
+                    description_cleaned,
+                    amount,
+                    transaction_date
+                ) ORDER BY transaction_date DESC LIMIT 5
+            ) AS example_transactions
+        FROM TransactionIntervals
+        GROUP BY 1, 2
+        HAVING COUNT(transaction_id) >= 3
         ORDER BY has_recurring_keywords DESC, transaction_count DESC
         LIMIT {batch_size};
     """
