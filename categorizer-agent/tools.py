@@ -278,7 +278,7 @@ def review_and_resolve_rule_conflicts() -> str:
             FROM `{RULES_TABLE_ID}`
             WHERE is_active = TRUE
             GROUP BY 1, 2, 3
-            HAVING COUNT(DISTINCT (category_l1, category_l2)) > 1
+            HAVING COUNT(DISTINCT FORMAT('%T', (category_l1, category_l2))) > 1
         )
         SELECT identifier, rule_type, transaction_type, rules FROM ConflictingRules
     """
