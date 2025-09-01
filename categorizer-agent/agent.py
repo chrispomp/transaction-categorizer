@@ -8,7 +8,7 @@ from google.adk.agents import Agent, LlmAgent, LoopAgent
 from google.adk.tools import AgentTool
 
 # Import configurations and tools
-from .config import VALID_CATEGORIES_JSON_STR
+from .config import VALID_CATEGORIES_JSON_STR, PROJECT_ID, DATASET_ID, TABLE_ID, RULES_TABLE_ID
 from .tools import (
     audit_data_quality,
     run_data_cleansing,
@@ -56,7 +56,7 @@ recurring_identification_loop = LoopAgent(
 
 single_merchant_batch_agent = LlmAgent(
     name="single_merchant_batch_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     tools=[get_merchant_batch_to_categorize, apply_bulk_merchant_update],
     instruction=f"""
     Your purpose is to perform one cycle of BATCH merchant-based transaction categorization.
@@ -79,7 +79,7 @@ merchant_categorization_loop = LoopAgent(
 
 single_pattern_batch_agent = LlmAgent(
     name="single_pattern_batch_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     tools=[get_pattern_batch_to_categorize, apply_bulk_pattern_update],
     instruction=f"""
     Your purpose is to perform one complete cycle of BATCH pattern-based transaction categorization.
@@ -103,7 +103,7 @@ pattern_categorization_loop = LoopAgent(
 
 single_transaction_categorizer_agent = LlmAgent(
     name="single_transaction_categorizer_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     tools=[fetch_batch_for_ai_categorization, update_categorizations_in_bigquery],
     instruction=f"""
     Your purpose is to perform one cycle of detailed, transaction-by-transaction categorization and report the result with enhanced detail.
@@ -149,7 +149,7 @@ root_agent = Agent(
         AgentTool(agent=pattern_categorization_loop),
         AgentTool(agent=transaction_categorization_loop),
     ],
-    instruction="""
+    instruction=f"""
     You are an elite financial transaction data analyst 🤖. Your purpose is to help users categorize their financial transactions using a powerful and efficient workflow.
 
     **Primary Workflow:**
@@ -190,5 +190,35 @@ root_agent = Agent(
 
     **Ad-hoc Queries:**
     - If the user asks a specific question about their data (e.g., "how many transactions from Starbucks?"), use the `execute_custom_query` tool to answer them.
+    - To do this effectively, you must understand the available data schemas. The following tables are available within the BigQuery dataset `{PROJECT_ID}.{DATASET_ID}`:
+
+        - **`{TABLE_ID}` (transactions)**: Contains the financial transaction data.
+          - **Key Columns**:
+            - `transaction_id` (STRING): Unique identifier for each transaction.
+            - `transaction_date` (DATE): The date the transaction occurred.
+            - `amount` (FLOAT): The transaction amount.
+            - `transaction_type` (STRING): 'Debit' or 'Credit'.
+            - `description_raw` (STRING): The original transaction description.
+            - `merchant_name_raw` (STRING): The original merchant name.
+            - `description_cleaned` (STRING): Cleaned version of the description.
+            - `merchant_name_cleaned` (STRING): Cleaned version of the merchant name.
+            - `category_l1` (STRING): The top-level category (e.g., 'Expense', 'Income').
+            - `category_l2` (STRING): The sub-category (e.g., 'Groceries', 'Shopping').
+            - `is_recurring` (BOOL): Flag for recurring transactions.
+            - `channel` (STRING): The source channel (e.g., 'Online', 'In-store').
+
+        - **`{RULES_TABLE_ID}` (categorization_rules)**: Stores rules for categorization.
+          - **Key Columns**:
+            - `rule_id` (STRING): Unique identifier for the rule.
+            - `identifier` (STRING): The string to match (e.g., merchant or pattern).
+            - `rule_type` (STRING): 'MERCHANT' or 'PATTERN'.
+            - `category_l1` (STRING): L1 category.
+            - `category_l2` (STRING): L2 category.
+            - `transaction_type` (STRING): 'Debit', 'Credit', or 'All'.
+            - `is_recurring_rule` (BOOL): Flag to set recurring status.
+            - `confidence_score` (INT64): Confidence level of the rule.
+            - `is_active` (BOOL): Whether the rule is currently active.
+
+    - Based on the user's natural language question, you should formulate a valid SQL query using the information above and pass it to the `execute_custom_query` tool. Always use the `{TABLE_ID}` and `{RULES_TABLE_ID}` variables instead of hardcoded table names.
     """
 )
