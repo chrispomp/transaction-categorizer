@@ -566,7 +566,7 @@ def apply_bulk_recurring_flags(categorized_json_string: str) -> str:
         logger.error(f"❌ BigQuery error during bulk recurring flag update: {e}")
         return json.dumps({"status": "error", "message": str(e)})
 
-def get_merchant_batch_to_categorize(tool_context: ToolContext, batch_size: int = 10) -> str:
+def get_merchant_batch_to_categorize(tool_context: ToolContext, batch_size: int = 50) -> str:
     """
     Fetches a batch of the most frequent uncategorized merchants for efficient bulk processing.
     """
@@ -655,7 +655,7 @@ def apply_bulk_merchant_update(categorized_json_string: str) -> str:
         logger.error(f"❌ BigQuery error during bulk merchant update: {e}")
         return json.dumps({"status": "error", "message": str(e)})
 
-def get_pattern_batch_to_categorize(tool_context: ToolContext, batch_size: int = 10) -> str:
+def get_pattern_batch_to_categorize(tool_context: ToolContext, batch_size: int = 20) -> str:
     """Fetches a batch of the most frequent uncategorized transaction patterns for efficient bulk processing."""
     logger.info(f"Fetching batch of {batch_size} patterns for bulk categorization...")
     query = f"""
