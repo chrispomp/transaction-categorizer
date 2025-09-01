@@ -138,7 +138,7 @@ def execute_custom_query(query: str) -> str:
 def run_data_cleansing() -> str:
     """
     Cleanses the raw merchant and description fields for all transactions that haven't been cleaned yet.
-    This involves converting to uppercase and removing special characters.
+    This involves converting to lowercase and removing special characters.
     """
     logger.info("Starting data cleansing for all transactions...")
     # This query will cleanse the raw fields for any transaction where the
@@ -148,8 +148,8 @@ def run_data_cleansing() -> str:
     USING (
         SELECT
             transaction_id,
-            TRIM(UPPER(REGEXP_REPLACE(REGEXP_REPLACE(REPLACE(IFNULL(description_raw, ''), '-', ''), r'[^a-zA-Z0-9\\s]', ' '), r'\\s+', ' '))) AS new_description_cleaned,
-            TRIM(UPPER(
+            TRIM(LOWER(REGEXP_REPLACE(REGEXP_REPLACE(REPLACE(IFNULL(description_raw, ''), '-', ''), r'[^a-zA-Z0-9\\s]', ' '), r'\\s+', ' '))) AS new_description_cleaned,
+            TRIM(LOWER(
                 REGEXP_EXTRACT(
                     REGEXP_REPLACE(REGEXP_REPLACE(REPLACE(IFNULL(merchant_name_raw, ''), '-', ''), r'[^a-zA-Z0-9\\s\\*#-]', ''), r'\\s+', ' '),
                     r'^(?:SQ\\s*\\*|PYPL\\s*\\*|CL\\s*\\*|\\*\\s*)?([^*#-]+)'
