@@ -127,7 +127,7 @@ transaction_categorization_loop = LoopAgent(
     name="transaction_categorization_loop",
     description="This agent starts the final, granular categorization. It automatically processes remaining transactions in batches, providing a detailed summary for each.",
     sub_agents=[single_transaction_categorizer_agent],
-    max_iterations=50
+    max_iterations=100
 )
 
 # --- Root Orchestrator Agent ---
