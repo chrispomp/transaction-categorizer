@@ -4,7 +4,7 @@
 
 # Environment variables
 # This file contains secrets like API keys and should NEVER be committed
-.env
+# .env
 
 # Python cache and compiled files
 __pycache__/
