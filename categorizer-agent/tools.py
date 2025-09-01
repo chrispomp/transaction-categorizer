@@ -138,7 +138,7 @@ def execute_custom_query(query: str) -> str:
 def run_data_cleansing() -> str:
     """
     Cleanses the raw merchant and description fields for all transactions that haven't been cleaned yet.
-    This involves converting to uppercase and removing special characters.
+    This involves converting to lowercase and removing special characters.
     """
     logger.info("Starting data cleansing for all transactions...")
     # This query will cleanse the raw fields for any transaction where the
@@ -148,8 +148,8 @@ def run_data_cleansing() -> str:
     USING (
         SELECT
             transaction_id,
-            TRIM(UPPER(REGEXP_REPLACE(REGEXP_REPLACE(REPLACE(IFNULL(description_raw, ''), '-', ''), r'[^a-zA-Z0-9\\s]', ' '), r'\\s+', ' '))) AS new_description_cleaned,
-            TRIM(UPPER(
+            TRIM(LOWER(REGEXP_REPLACE(REGEXP_REPLACE(REPLACE(IFNULL(description_raw, ''), '-', ''), r'[^a-zA-Z0-9\\s]', ' '), r'\\s+', ' '))) AS new_description_cleaned,
+            TRIM(LOWER(
                 REGEXP_EXTRACT(
                     REGEXP_REPLACE(REGEXP_REPLACE(REPLACE(IFNULL(merchant_name_raw, ''), '-', ''), r'[^a-zA-Z0-9\\s\\*#-]', ''), r'\\s+', ' '),
                     r'^(?:SQ\\s*\\*|PYPL\\s*\\*|CL\\s*\\*|\\*\\s*)?([^*#-]+)'
@@ -955,7 +955,7 @@ def add_rule_to_table(
     category_l1: str,
     category_l2: str,
     transaction_type: str,
-    is_recurring_rule: bool | None = None
+    is_recurring_rule: bool = False
 ) -> str:
     """
     Adds or updates a user-defined rule in the categorization_rules table.
@@ -1023,7 +1023,7 @@ def add_rule_to_table(
     """
     job_config = bigquery.QueryJobConfig(
         query_parameters=[
-            bigquery.ScalarQueryParameter("identifier", "STRING", identifier.upper()),
+            bigquery.ScalarQueryParameter("identifier", "STRING", identifier.lower()),
             bigquery.ScalarQueryParameter("rule_type", "STRING", rule_type),
             bigquery.ScalarQueryParameter("transaction_type", "STRING", transaction_type),
             bigquery.ScalarQueryParameter("category_l1", "STRING", category_l1),
@@ -1037,7 +1037,7 @@ def add_rule_to_table(
         job = bq_client.query(merge_sql, job_config=job_config)
         job.result()
         logger.info(f"Successfully added/updated rule for identifier: '{identifier}'.")
-        return f"✅ **Rule Created**: I have successfully created a new rule for '{identifier.upper()}'."
+        return f"✅ **Rule Created**: I have successfully created a new rule for '{identifier.lower()}'."
     except (GoogleAPICallError, Exception) as e:
         logger.error(f"❌ BigQuery error during custom rule creation: {e}")
         return f"❌ **Error Creating Rule**: An error occurred while trying to create the rule. Please check the logs. Error: {e}"
