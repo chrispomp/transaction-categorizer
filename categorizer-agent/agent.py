@@ -25,10 +25,12 @@ try:
     PROJECT_ID = os.environ["GCP_PROJECT_ID"]
     DATASET_ID = os.environ["BIGQUERY_DATASET"]
     TABLE_NAME = os.environ["BIGQUERY_TABLE"]
+    RULES_TABLE_NAME = os.environ["BIGQUERY_RULES_TABLE"] # NEW
     TEMP_TABLE_NAME = os.environ["BIGQUERY_TEMP_TABLE"]
     LOCATION = os.getenv("GCP_LOCATION", "us-central1")
 
     TABLE_ID = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_NAME}"
+    RULES_TABLE_ID = f"{PROJECT_ID}.{DATASET_ID}.{RULES_TABLE_NAME}" # NEW
     TEMP_TABLE_ID = f"{PROJECT_ID}.{DATASET_ID}.{TEMP_TABLE_NAME}"
 
     os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "TRUE"
@@ -50,7 +52,7 @@ except (GoogleAPICallError, Exception) as e:
 VALID_CATEGORIES = {
     "Income": ["Gig Income", "Payroll", "Other Income"],
     "Expense": [
-        "Groceries", "Dining & Drinks", "Shopping", "Entertainment",
+        "Groceries", "Food & Dining", "Shopping", "Entertainment",
         "Health & Wellness", "Auto & Transport", "Travel & Vacation",
         "Software & Tech", "Medical", "Insurance", "Bills & Utilities",
         "Fees & Charges", "Business Services"
@@ -119,7 +121,7 @@ def _validate_bulk_llm_results(categorized_json_string: str, required_keys: list
 
 # --- 3. Tool Definitions ---
 
-# --- Report & Reset Tools ---
+# --- Report, Reset, & Custom Query Tools ---
 def audit_data_quality() -> str:
     """
     Runs a comprehensive data quality audit on the main transaction table.
@@ -191,116 +193,109 @@ def reset_all_categorizations(tool_context: ToolContext, confirm: bool = False) 
         logger.error(f"❌ BigQuery error during reset operation: {e}")
         return f"❌ **Error During Reset**\nA BigQuery error occurred during the reset operation. Please check the logs. Error: {e}"
 
-
-# --- Phase 1: Rules-Based Categorization Tools ---
-def run_cleansing_and_rules_categorization() -> str:
+def execute_custom_query(query: str) -> str:
     """
-    Performs comprehensive data cleansing, including timestamp validation,
-    merchant name extraction, and applies deterministic rules to categorize
-    transactions.
+    Executes a user-provided SQL query against the transaction data.
+    Primarily for SELECT statements to perform custom analysis.
+    WARNING: Can execute UPDATE or DELETE, use with caution.
     """
-    logger.info("Starting data cleansing and rules-based categorization...")
+    logger.info(f"Executing custom user query: {query}")
+    # Basic validation to prevent common mistakes
+    if not query.lower().strip().startswith(('select', 'update', 'with', 'merge')):
+        return "❌ **Invalid Query**: This tool only supports SELECT, UPDATE, MERGE, or WITH statements for security reasons."
 
-    sql_combined_phase = f"""
+    try:
+        # Replace a placeholder with the actual table ID for user convenience
+        final_query = query.replace("{{TABLE_ID}}", f"`{TABLE_ID}`")
+        
+        query_job = bq_client.query(final_query)
+        results = query_job.result()
+        
+        if query_job.statement_type == "SELECT":
+            df = results.to_dataframe()
+            if df.empty:
+                return "✅ **Query Successful**: The query ran successfully but returned no results."
+            else:
+                response = f"✅ **Query Successful**:\n\n{df.to_markdown(index=False)}"
+                return response
+        else: # Handle DML statements (UPDATE, INSERT, MERGE)
+            affected_rows = results.num_dml_affected_rows or 0
+            return f"✅ **Query Successful**: The operation completed and affected **{affected_rows}** rows."
+
+    except GoogleAPICallError as e:
+        logger.error(f"❌ BigQuery error during custom query execution: {e}")
+        return f"❌ **Error During Query Execution**\nA BigQuery error occurred. Please check the syntax of your query and the application logs. Error: {e}"
+    except Exception as e:
+        logger.error(f"❌ Unexpected error during custom query execution: {e}")
+        return f"❌ **Unexpected Error**\nAn unexpected error occurred. Please check the logs. Error: {e}"
+
+
+# --- Phase 1: Dynamic Rules-Based Tools ---
+def run_cleansing_and_dynamic_rules() -> str:
+    """
+    Performs data cleansing and applies categorization rules dynamically
+    from the dedicated rules table in BigQuery.
+    """
+    logger.info("Starting data cleansing and DYNAMIC rules-based categorization...")
+
+    sql_cleansing_and_rules = f"""
     MERGE `{TABLE_ID}` AS T
     USING (
         WITH
         CleansedData AS (
             SELECT
                 transaction_id,
-                amount,
-                SAFE_CAST(transaction_date AS TIMESTAMP) AS new_transaction_date,
+                -- Perform initial cleansing on raw fields
                 TRIM(LOWER(REGEXP_REPLACE(REGEXP_REPLACE(REPLACE(IFNULL(description_raw, ''), '-', ''), r'[^a-zA-Z0-9\\s]', ' '), r'\\s+', ' '))) AS new_description_cleaned,
                 TRIM(LOWER(
                     REGEXP_EXTRACT(
                         REGEXP_REPLACE(REGEXP_REPLACE(REPLACE(IFNULL(merchant_name_raw, ''), '-', ''), r'[^a-zA-Z0-9\\s\\*#-]', ''), r'\\s+', ' '),
                         r'^(?:sq\\s*\\*|pypl\\s*\\*|cl\\s*\\*|\\*\\s*)?([^*#-]+)'
                     )
-                )) AS new_merchant_name_cleaned,
-                CASE
-                    WHEN transaction_type = 'Credit' AND amount < 0 THEN 'Debit'
-                    WHEN transaction_type = 'Debit' AND amount > 0 THEN 'Credit'
-                    ELSE transaction_type
-                END AS cleansed_transaction_type
+                )) AS new_merchant_name_cleaned
             FROM `{TABLE_ID}`
         ),
-        CombinedSearchText AS (
+        -- Join with the dynamic rules table to find matches
+        CategorizedByRule AS (
             SELECT
-                *,
-                CONCAT(IFNULL(new_description_cleaned, ''), ' ', IFNULL(new_merchant_name_cleaned, '')) as search_text
-            FROM CleansedData
-        ),
-        L2_Categorized AS (
-            SELECT
-                *,
-                CASE
-                    WHEN REGEXP_CONTAINS(search_text, r'credit card payment|online pmt|payment received|paymentthank you|mobile payment|autopay|e-payment|card pmt|amex epayment|dda transaction') THEN 'Credit Card Payment'
-                    WHEN REGEXP_CONTAINS(search_text, r'internal transfer|transfer received|money in|money out|xfer|transfer|transfer from|transfer to|from chk|to chk|to savings|wealthfront|ally financial') THEN 'Internal Transfer'
-                    WHEN (cleansed_transaction_type = 'Credit' AND amount > 0) AND REGEXP_CONTAINS(search_text, r'uber|lyft|doordash|instacart|upwork|fiverr|taskrabbit|gig|stripe payout|etsy deposit') THEN 'Gig Income'
-                    WHEN (cleansed_transaction_type = 'Credit' AND amount > 0) AND REGEXP_CONTAINS(search_text, r'payroll|paycheck|direct\\s*deposit|adp|workday') THEN 'Payroll'
-                    WHEN (cleansed_transaction_type = 'Credit' AND amount > 0) AND REGEXP_CONTAINS(search_text, r'interest|rewards|cash back|refund|reimbursement|dividend|invbanktran int') THEN 'Other Income'
-                    WHEN (cleansed_transaction_type = 'Debit' AND amount < 0) AND REGEXP_CONTAINS(search_text, r'atm fee|overdraft|interest|service charge|late fee|foreign transaction|cash withdrawal') THEN 'Fees & Charges'
-                    WHEN (cleansed_transaction_type = 'Debit' AND amount < 0) AND REGEXP_CONTAINS(search_text, r'uber|lyft|chevron|shell|mobil|lirr|gas|metro|parking|toll|auto\\s*repair|jiffy\\s*lube|autozone|pep boys|lime|bird|amtrak|bart|mta') THEN 'Auto & Transport'
-                    WHEN (cleansed_transaction_type = 'Debit' AND amount < 0) AND REGEXP_CONTAINS(search_text, r'tmobile|at&t|verizon|comcast|spectrum|pge|internet|phone|utility|sewer|water|con edison|mint mobile|billpay|rent|mortgage') THEN 'Bills & Utilities'
-                    WHEN (cleansed_transaction_type = 'Debit' AND amount < 0) AND REGEXP_CONTAINS(search_text, r'mcdonalds|starbucks|pizza|pizzeria|restaurant|cafe|dominos|deli|dunkin|wendys|taco\\s*bell|coffee|pizza|chipotle|brewery|burger\\s*king|eats|grubhub|seamless|postmates|caviar|doordash') THEN 'Dining & Drinks'
-                    WHEN (cleansed_transaction_type = 'Debit' AND amount < 0) AND REGEXP_CONTAINS(search_text, r'amc|theatres|dicks\\s*sporting|netflix|spotify|hulu|ticketmaster|eventbrite|steam\\s*games|disney\\s*plus|peacock|max|playstation|xbox|nintendo|seatgeek') THEN 'Entertainment'
-                    WHEN (cleansed_transaction_type = 'Debit' AND amount < 0) AND REGEXP_CONTAINS(search_text, r'whole\\s*foods|factor75|trader\\s*joes|safeway|kroger|costco|groceries|king kullen|kingkullen|stop and shop|instacart') THEN 'Groceries'
-                    WHEN (cleansed_transaction_type = 'Debit' AND amount < 0) AND REGEXP_CONTAINS(search_text, r'fitness|equinox|24\\s*hour|la\\s*fitness|yoga|gym|vitamin|gnc|peloton') THEN 'Health & Wellness'
-                    WHEN (cleansed_transaction_type = 'Debit' AND amount < 0) AND REGEXP_CONTAINS(search_text, r'geico|state\\s*farm|progressive|allstate|metlife|insurance|lemonade') THEN 'Insurance'
-                    WHEN (cleansed_transaction_type = 'Debit' AND amount < 0) AND REGEXP_CONTAINS(search_text, r'hospital|doctor|medical|dr\\s*|dentist|pharmacy|cvs|walgreens|clinic') THEN 'Medical'
-                    WHEN (cleansed_transaction_type = 'Debit' AND amount < 0) AND REGEXP_CONTAINS(search_text, r'amazon|amzn|target|walmart|best\\s*buy|marshalls|kohls|macys|nike|shopping|home\\s*depot|lowes|etsy|ebay|nordstrom|kohls|zappos') THEN 'Shopping'
-                    WHEN (cleansed_transaction_type = 'Debit' AND amount < 0) AND REGEXP_CONTAINS(search_text, r'adobe|google|audible|spotify|netflix|hulu|microsoft|zoom|slack|software|aws|tech|openai|godaddy|[apple.com/bill](https://apple.com/bill)|icloud|notion|figma') THEN 'Software & Tech'
-                    WHEN (cleansed_transaction_type = 'Debit' AND amount < 0) AND REGEXP_CONTAINS(search_text, r'delta|united|jetblue|southwest|hotel|resort|airport|marriott|hilton|airbnb|expedia|booking.com|vrbo|american|spirit|frontier') THEN 'Travel & Vacation'
-                    WHEN (cleansed_transaction_type = 'Debit' AND amount < 0) AND REGEXP_CONTAINS(search_text, r'legalzoom|docusign|hellosign|upcounsel|clerky') THEN 'Business Services'
-                    ELSE NULL
-                END AS new_category_l2
-            FROM CombinedSearchText
-        ),
-        Final_Categorization AS (
-            SELECT
-                *,
-                CASE
-                    WHEN new_category_l2 IN ('Credit Card Payment', 'Internal Transfer') THEN 'Transfer'
-                    WHEN new_category_l2 IN ('Gig Income', 'Payroll', 'Other Income') THEN 'Income'
-                    WHEN new_category_l2 IS NOT NULL THEN 'Expense'
-                    ELSE NULL
-                END as new_category_l1
-            FROM L2_Categorized
+                cd.transaction_id,
+                cd.new_description_cleaned,
+                cd.new_merchant_name_cleaned,
+                rules.category_l1,
+                rules.category_l2
+            FROM CleansedData cd
+            JOIN `{RULES_TABLE_ID}` rules
+                ON cd.new_merchant_name_cleaned = rules.identifier AND rules.rule_type = 'MERCHANT'
         )
         SELECT
             transaction_id,
-            new_transaction_date,
-            cleansed_transaction_type,
             new_description_cleaned,
             new_merchant_name_cleaned,
-            new_category_l1,
-            new_category_l2
-        FROM Final_Categorization
-    ) AS U ON T.transaction_id = U.transaction_id
-    WHEN MATCHED THEN
+            category_l1,
+            category_l2
+        FROM CategorizedByRule
+    ) AS U
+    ON T.transaction_id = U.transaction_id
+    WHEN MATCHED AND T.category_l1 IS NULL THEN
         UPDATE SET
-            T.transaction_date = U.new_transaction_date,
-            T.transaction_type = U.cleansed_transaction_type,
             T.description_cleaned = U.new_description_cleaned,
             T.merchant_name_cleaned = U.new_merchant_name_cleaned,
-            T.category_l1 = COALESCE(U.new_category_l1, T.category_l1),
-            T.category_l2 = COALESCE(U.new_category_l2, T.category_l2),
-            T.categorization_method = CASE WHEN U.new_category_l2 IS NOT NULL THEN 'rules-based' ELSE T.categorization_method END,
+            T.category_l1 = U.category_l1,
+            T.category_l2 = U.category_l2,
+            T.categorization_method = 'dynamic-rules-based',
             T.categorization_update_timestamp = CURRENT_TIMESTAMP();
     """
 
     try:
-        query_job = bq_client.query(sql_combined_phase)
+        query_job = bq_client.query(sql_cleansing_and_rules)
         query_job.result()
         affected_rows = query_job.num_dml_affected_rows or 0
-        logger.info("✅ Successfully ran cleansing and rules engine. %d rows affected.", affected_rows)
-        return f"⚙️ **Cleansing & Rules Engine Complete**\n\nI've successfully processed the data. A total of **{affected_rows}** rows were cleansed and/or categorized based on predefined rules. We can now proceed with the next steps."
-    except GoogleAPICallError as e:
-        logger.error(f"❌ BigQuery error during cleansing and rules phase: {e}")
-        return f"❌ **Error During Cleansing**\nA BigQuery error occurred. Please check the application logs for details. Error: {e}"
-    except Exception as e:
-        logger.error(f"❌ Unexpected error during cleansing and rules phase: {e}")
-        return f"❌ **Unexpected Error**\nAn unexpected error occurred during the cleansing step. Please check the application logs. Error: {e}"
+        logger.info("✅ Successfully ran cleansing and dynamic rules engine. %d rows affected.", affected_rows)
+        return f"⚙️ **Cleansing & Dynamic Rules Engine Complete**\n\nSuccessfully processed the data. A total of **{affected_rows}** rows were cleansed and categorized based on the dynamic rules table."
+    except (GoogleAPICallError, Exception) as e:
+        logger.error(f"❌ BigQuery error during cleansing and dynamic rules phase: {e}")
+        return f"❌ **Error During Cleansing & Rules**\nA BigQuery error occurred. Please check the logs. Error: {e}"
+
 
 def run_recurring_transaction_harmonization() -> str:
     """
@@ -361,25 +356,20 @@ def run_recurring_transaction_harmonization() -> str:
         affected_rows = query_job.num_dml_affected_rows or 0
         logger.info("✅ Recurring transaction harmonization complete. %d rows affected.", affected_rows)
         if affected_rows > 0:
-            return f"🔄 **Harmonization Complete**\n\nI've successfully standardized the categories for **{affected_rows}** recurring transactions, ensuring consistency with previously categorized entries. This improves overall data quality."
+            return f"🔄 **Harmonization Complete**\n\nI've successfully standardized the categories for **{affected_rows}** recurring transactions, ensuring consistency."
         else:
-            return "✅ **Harmonization Complete**\n\nNo recurring transactions needed harmonization at this time. All recurring entries are consistent."
+            return "✅ **Harmonization Complete**\n\nNo recurring transactions needed harmonization at this time."
 
     except GoogleAPICallError as e:
         logger.error(f"❌ BigQuery error during harmonization phase: {e}")
         return f"❌ **Error During Harmonization**\nA BigQuery error occurred. Please check the logs. Error: {e}"
-    except Exception as e:
-        logger.error(f"❌ Unexpected error during harmonization phase: {e}")
-        return f"❌ **Unexpected Error**\nAn unexpected error occurred during the harmonization step. Please check the logs. Error: {e}"
+
 
 # --- Phase 2 & 3: AI-Based Bulk & Recurring Tools ---
-
-# --- Tools for AI Recurring Identification ---
 def get_recurring_candidates_batch(tool_context: ToolContext, batch_size: int = 15) -> str:
     """
     Fetches a batch of merchants that are potential candidates for being recurring.
-    Gathers evidence like transaction counts, amount stability, time intervals, and example descriptions.
-    This version is optimized to only select candidates with 3+ transactions.
+    Gathers evidence like transaction counts, amount stability, and time intervals.
     """
     logger.info(f"Fetching batch of {batch_size} recurring merchant candidates...")
     query = f"""
@@ -432,7 +422,6 @@ def get_recurring_candidates_batch(tool_context: ToolContext, batch_size: int = 
             tool_context.actions.escalate = True
             return json.dumps({"status": "complete", "message": "No more recurring candidates to process."})
         
-        # Clean up data types before converting to JSON
         df['stddev_amount'] = pd.to_numeric(df['stddev_amount'], errors='coerce').fillna(0)
         df['avg_amount'] = pd.to_numeric(df['avg_amount'], errors='coerce').fillna(0)
         
@@ -496,7 +485,6 @@ def apply_bulk_recurring_flags(categorized_json_string: str) -> str:
         logger.error(f"❌ BigQuery error during bulk recurring flag update: {e}")
         return json.dumps({"status": "error", "message": str(e)})
 
-# --- Tools for AI Bulk Categorization ---
 def get_merchant_batch_to_categorize(tool_context: ToolContext, batch_size: int = 10) -> str:
     """
     Fetches a batch of the most frequent uncategorized merchants for efficient bulk processing.
@@ -679,7 +667,7 @@ def apply_bulk_pattern_update(categorized_json_string: str) -> str:
         return json.dumps({"status": "error", "message": str(e)})
 
 
-# --- Phase 4: Transaction-Level AI Tools ---
+# --- Phase 4: Transaction-Level AI & Learning Tools ---
 def fetch_batch_for_ai_categorization(tool_context: ToolContext, batch_size: int = 200) -> str:
     """Fetches a batch of individual uncategorized transactions for detailed, row-by-row AI processing."""
     logger.info(f"Fetching batch for AI categorization with enriched context. Batch size: {batch_size}")
@@ -704,7 +692,6 @@ def fetch_batch_for_ai_categorization(tool_context: ToolContext, batch_size: int
         logger.error(f"❌ Failed to fetch batch from BigQuery: {e}")
         tool_context.actions.escalate = True
         return json.dumps({"status": "error", "message": f"Failed to fetch data: {e}"})
-
 
 def update_categorizations_in_bigquery(categorized_json_string: str) -> str:
     """
@@ -744,7 +731,6 @@ def update_categorizations_in_bigquery(categorized_json_string: str) -> str:
         updated_count = merge_job.num_dml_affected_rows or 0
         logger.info("✅ Successfully updated %d records in BigQuery via AI.", updated_count)
 
-        # Generate a summary of the applied categories
         category_summary = validated_df.groupby(['category_l1', 'category_l2']).size().reset_index(name='count').to_dict('records')
 
         return json.dumps({
@@ -752,75 +738,119 @@ def update_categorizations_in_bigquery(categorized_json_string: str) -> str:
             "updated_count": updated_count,
             "summary": category_summary
         })
-    except GoogleAPICallError as e:
+    except (GoogleAPICallError, Exception) as e:
         logger.error(f"❌ BigQuery error during update: {e}")
         return json.dumps({"status": "error", "message": f"Failed to update BigQuery: {e}"})
-    except Exception as e:
-        logger.error(f"❌ Unexpected error during BigQuery update: {e}")
-        return json.dumps({"status": "error", "message": f"An unexpected error occurred during update: {e}"})
+
+def harvest_new_rules() -> str:
+    """
+    Identifies high-confidence categories from AI processing and saves them as new rules
+    for future use, making the agent smarter over time.
+    """
+    logger.info("Harvesting new rules from AI categorizations...")
+    
+    harvest_sql = f"""
+    MERGE `{RULES_TABLE_ID}` R
+    USING (
+        -- Find merchants consistently categorized by the AI
+        SELECT
+            merchant_name_cleaned,
+            transaction_type,
+            category_l1,
+            category_l2,
+            COUNT(transaction_id) AS confidence_score
+        FROM `{TABLE_ID}`
+        WHERE categorization_method IN ('llm-bulk-merchant-based', 'llm-transaction-based')
+            AND merchant_name_cleaned IS NOT NULL
+        GROUP BY 1, 2, 3, 4
+        -- Only create rules for high-confidence patterns (e.g., seen at least 5 times)
+        HAVING COUNT(transaction_id) >= 5
+    ) AS NewRules
+    ON R.identifier = NewRules.merchant_name_cleaned
+        AND R.rule_type = 'MERCHANT'
+        AND R.transaction_type = NewRules.transaction_type
+    -- If a rule for this merchant already exists, update it if the new one is more confident
+    WHEN MATCHED AND NewRules.confidence_score > R.confidence_score THEN
+        UPDATE SET
+            category_l1 = NewRules.category_l1,
+            category_l2 = NewRules.category_l2,
+            confidence_score = NewRules.confidence_score,
+            last_updated_timestamp = CURRENT_TIMESTAMP()
+    -- If no rule exists, insert a new one
+    WHEN NOT MATCHED THEN
+        INSERT (rule_id, rule_type, identifier, transaction_type, category_l1, category_l2, confidence_score, created_timestamp, last_updated_timestamp)
+        VALUES (
+            GENERATE_UUID(),
+            'MERCHANT',
+            NewRules.merchant_name_cleaned,
+            NewRules.transaction_type,
+            NewRules.category_l1,
+            NewRules.category_l2,
+            NewRules.confidence_score,
+            CURRENT_TIMESTAMP(),
+            CURRENT_TIMESTAMP()
+        );
+    """
+    try:
+        harvest_job = bq_client.query(harvest_sql)
+        harvest_job.result()
+        new_rules_count = harvest_job.num_dml_affected_rows or 0
+        if new_rules_count > 0:
+            logger.info("✅ Successfully harvested %d new rules.", new_rules_count)
+            return f"🧠 **Learning Complete**: I've analyzed the recent AI categorizations and created or updated **{new_rules_count}** new high-confidence rules. The agent is now smarter for the next run!"
+        else:
+            logger.info("No new high-confidence rules to harvest.")
+            return "🧠 **Learning Complete**: No new patterns met the confidence threshold to be saved as rules at this time."
+
+    except (GoogleAPICallError, Exception) as e:
+        logger.error(f"❌ BigQuery error during rule harvesting: {e}")
+        return f"❌ **Error During Learning**: An error occurred while trying to save new rules. Please check the logs. Error: {e}"
 
 
-# --- 4. Agent Definitions ---
+# --- 5. Agent Definitions ---
 
-# --- Bulk Recurring Identification Loop ---
+# --- Loop Agents for Batch Processing ---
 single_recurring_batch_agent = LlmAgent(
     name="single_recurring_batch_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     tools=[get_recurring_candidates_batch, apply_bulk_recurring_flags],
     instruction="""
-    Your purpose is to perform one complete cycle of BATCH recurring transaction identification.
-
-    **Your process is a strict, three-step sequence:**
-    1.  **FETCH BATCH:** First, call `get_recurring_candidates_batch` to get a list of potential recurring merchants.
-        - If the tool returns a "complete" status, you must stop and escalate.
-    2.  **ANALYZE & UPDATE BATCH:** Analyze the JSON data for ALL merchants. Based on the evidence, decide if the merchant represents a recurring charge. Look for clues like:
-        - `transaction_intervals_days`: A list of numbers showing the days between transactions. Look for consistent patterns (e.g., `[30, 31, 29]` for monthly, or `[7, 7, 7]` for weekly). This is a very strong signal.
-        - `has_recurring_keywords` being true.
-        - A low standard deviation (`stddev_amount`) relative to the average amount (`avg_amount`), indicating consistent payment amounts.
-        - Keywords in the `example_transactions` like 'monthly', 'subscription', etc.
-        
-        Then, call `apply_bulk_recurring_flags` ONCE with a single JSON array containing your decisions. Your JSON output should be a list of objects, each with `merchant_name_cleaned`, `transaction_type`, and a boolean `is_recurring`. **Only include merchants you confidently identify as recurring.**
-    3.  **REPORT BATCH:** The update tool will return a JSON object with `updated_count` and a `summary`. Use this to create a user-friendly markdown report. For example: "🔍 Identified 'spotify' and 'netflix' as recurring, flagging 24 new transactions."
+    Your purpose is to perform one cycle of BATCH recurring transaction identification.
+    1. **FETCH**: Call `get_recurring_candidates_batch` to get potential recurring merchants. Escalate if complete.
+    2. **ANALYZE & UPDATE**: Analyze the JSON for ALL merchants. Decide if a merchant is recurring based on `transaction_intervals_days` (strong signal for patterns like `[30, 31, 29]`), `has_recurring_keywords`, and low `stddev_amount`. Then, call `apply_bulk_recurring_flags` ONCE with a JSON list of objects for merchants you are confident are recurring. Each object must have `merchant_name_cleaned`, `transaction_type`, and `is_recurring: true`.
+    3. **REPORT**: The update tool returns `updated_count` and a `summary`. Create a markdown report, e.g., "🔍 Identified 'spotify' and 'netflix' as recurring, flagging 24 new transactions."
     """,
 )
 
 recurring_identification_loop = LoopAgent(
     name="recurring_identification_loop",
-    description="This agent starts an intelligent, AI-driven process to find and flag recurring transactions like subscriptions and bills. It processes merchants in batches and provides real-time summaries.",
+    description="This agent starts an AI-driven process to find and flag recurring transactions. It processes merchants in batches and provides real-time summaries.",
     sub_agents=[single_recurring_batch_agent],
     max_iterations=10
 )
 
-# --- Bulk Merchant Processing Loop ---
 single_merchant_batch_agent = LlmAgent(
     name="single_merchant_batch_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     tools=[get_merchant_batch_to_categorize, apply_bulk_merchant_update],
     instruction=f"""
-    Your purpose is to perform one complete cycle of BATCH merchant-based transaction categorization.
-
-    **Your process is a strict, three-step sequence:**
-    1.  **FETCH BATCH:** First, call `get_merchant_batch_to_categorize` to get a batch of up to 10 merchant groups.
-        - If the tool returns a "complete" status, you must stop and escalate.
-    2.  **ANALYZE & UPDATE BATCH:** Analyze the JSON data for ALL merchants in the batch. For each one, determine the correct `category_l1` and `category_l2` from the valid list: {VALID_CATEGORIES_JSON_STR}.
-        
-        Then, call `apply_bulk_merchant_update` ONCE with a single JSON string. **Crucially, your JSON for each merchant MUST include the `merchant_name_cleaned`, the original `transaction_type`, `category_l1`, and `category_l2`.**
-    3.  **REPORT BATCH:** The update tool will return a JSON object with `updated_count` and a `summary`. Use this to create a user-friendly markdown report summarizing the batch. For example: "🛒 Processed a batch of 3 merchants, updating 112 transactions. Key updates include 'grubhub' to Dining & Drinks and 'uber' to Auto & Transport."
+    Your purpose is to perform one cycle of BATCH merchant-based transaction categorization.
+    1. **FETCH**: Call `get_merchant_batch_to_categorize`. Escalate if complete.
+    2. **ANALYZE & UPDATE**: For ALL merchants in the batch, determine the correct `category_l1` and `category_l2` from: {VALID_CATEGORIES_JSON_STR}. Then, call `apply_bulk_merchant_update` ONCE with a single JSON string. Each merchant object MUST include `merchant_name_cleaned`, `transaction_type`, `category_l1`, and `category_l2`.
+    3. **REPORT**: The tool returns `updated_count` and a `summary`. Create a markdown report, e.g., "🛒 Processed a batch of 3 merchants, updating 112 transactions. Key updates include 'grubhub' to Food & Dining."
     """,
 )
 
 merchant_categorization_loop = LoopAgent(
     name="merchant_categorization_loop",
-    description="This agent starts an efficient, automated categorization process. In each cycle, it processes a BATCH of the most common uncategorized merchants, providing a real-time summary for each batch. It continues until no more merchant groups are found.",
+    description="This agent starts an efficient, automated categorization by processing BATCHES of common uncategorized merchants, providing a summary for each batch.",
     sub_agents=[single_merchant_batch_agent],
     max_iterations=10
 )
 
-
-# --- Bulk Pattern Processing Loop ---
 single_pattern_batch_agent = LlmAgent(
     name="single_pattern_batch_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     tools=[get_pattern_batch_to_categorize, apply_bulk_pattern_update],
     instruction=f"""
     Your purpose is to perform one complete cycle of BATCH pattern-based transaction categorization.
@@ -828,53 +858,39 @@ single_pattern_batch_agent = LlmAgent(
     **Your process is a strict, three-step sequence:**
     1.  **FETCH BATCH:** First, you MUST call `get_pattern_batch_to_categorize` to get a batch of up to 10 pattern groups.
         - If the tool returns a "complete" status, you must stop and escalate.
-    2.  **ANALYZE & UPDATE BATCH:** Analyze the JSON data for ALL patterns. For each one, determine the correct `category_l1` and `category_l2` from the valid list: {VALID_CATEGORIES_JSON_STR}. Then, call `apply_bulk_pattern_update` ONCE with a single JSON string for the entire batch.
+    2.  **ANALYZE & UPDATE BATCH:** Analyze the JSON data for ALL patterns. For each one, determine the correct `category_l1` and `category_l2` from the valid list: {VALID_CATEGORIES_JSON_STR}.
+        Then, call `apply_bulk_pattern_update` ONCE. **Your output must be a single JSON array** that includes an entry for every pattern in the batch you received.
     3.  **REPORT BATCH:** The update tool returns `updated_count` and a `summary`. Use this to create a user-friendly markdown report. For example: "🧾 Processed a batch of 5 patterns, updating 88 transactions. This included patterns like 'payment thank you' being set to Credit Card Payment."
     """,
 )
 
 pattern_categorization_loop = LoopAgent(
     name="pattern_categorization_loop",
-    description="This agent starts an advanced, batch-based categorization on common transaction description patterns. It repeatedly finds a batch of common patterns, categorizes them, and provides a real-time summary. This is best used after the merchant-based tool.",
+    description="This agent starts an advanced, batch-based categorization on common transaction description patterns, providing real-time summaries.",
     sub_agents=[single_pattern_batch_agent],
     max_iterations=10
 )
 
-
-# --- Transaction-Level Processing Loop ---
 single_transaction_categorizer_agent = LlmAgent(
     name="single_transaction_categorizer_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     tools=[fetch_batch_for_ai_categorization, update_categorizations_in_bigquery],
     instruction=f"""
-    Your purpose is to perform one complete cycle of detailed, transaction-by-transaction categorization and report the result with enhanced detail.
-
-    **Your process is a strict, three-step sequence:**
-    1.  **FETCH:** First, you MUST call the `fetch_batch_for_ai_categorization` tool to get a batch of individual transactions.
-        - If the tool returns a "complete" status, you must stop and escalate immediately. Do not proceed.
-    2.  **CATEGORIZE & UPDATE:** Second, for the batch of transactions you just fetched, you MUST call `update_categorizations_in_bigquery`.
-        - You will generate a `categorized_json_string` by analyzing each transaction.
-        - This string MUST be a JSON array of objects.
-        - Each object MUST have exactly three keys: `transaction_id`, `category_l1`, and `category_l2`.
-        - You MUST use a valid L1 and L2 category from this list: {VALID_CATEGORIES_JSON_STR}.
-        - Example: `[ {{"transaction_id": "123", "category_l1": "Expense", "category_l2": "Shopping"}}, {{"transaction_id": "456", "category_l1": "Expense", "category_l2": "Groceries"}} ]`
-    3.  **REPORT:** Third, the update tool will return a JSON object containing `updated_count` and a `summary` of the categories. You MUST present this information clearly in a user-friendly markdown format. For example:
+    Your purpose is to perform one cycle of detailed, transaction-by-transaction categorization and report the result with enhanced detail.
+    1.  **FETCH**: Call `fetch_batch_for_ai_categorization`. If it returns "complete", escalate immediately.
+    2.  **CATEGORIZE & UPDATE**: Call `update_categorizations_in_bigquery` with a `categorized_json_string`. This string MUST be a JSON array of objects, each with `transaction_id`, `category_l1`, and `category_l2` from the valid list: {VALID_CATEGORIES_JSON_STR}.
+    3.  **REPORT**: The update tool returns `updated_count` and a `summary`. Present this clearly in markdown. Example:
         "✅ Processed a batch of 198 transactions.
         - **Shopping**: 75 transactions
         - **Groceries**: 50 transactions
-        - **Dining & Drinks**: 73 transactions
         Now moving to the next batch..."
-
-    Execute this cycle repeatedly. Your primary goal is accuracy and adherence to the specified JSON format.
     """,
 )
 
 transaction_categorization_loop = LoopAgent(
     name="transaction_categorization_loop",
-    description="This agent starts the final, most granular categorization. It automatically processes any remaining transactions one by one, providing a detailed, real-time summary for each batch until the job is complete.",
+    description="This agent starts the final, granular categorization. It automatically processes remaining transactions in batches, providing a detailed summary for each.",
     sub_agents=[single_transaction_categorizer_agent],
-    # A high max_iterations allows the loop to process a large number of transactions.
-    # With a batch size of 200, 50 iterations can process up to 10,000 transactions.
     max_iterations=50
 )
 
@@ -884,9 +900,11 @@ root_agent = Agent(
     model="gemini-2.5-flash",
     tools=[
         audit_data_quality,
-        run_cleansing_and_rules_categorization,
+        run_cleansing_and_dynamic_rules, # MODIFIED
         run_recurring_transaction_harmonization,
         reset_all_categorizations,
+        execute_custom_query, # NEW
+        harvest_new_rules, # NEW
         AgentTool(agent=recurring_identification_loop),
         AgentTool(agent=merchant_categorization_loop),
         AgentTool(agent=pattern_categorization_loop),
@@ -896,20 +914,20 @@ root_agent = Agent(
     You are an elite financial transaction data analyst 🤖. Your purpose is to guide the user through a multi-step transaction categorization process. Be clear, concise, proactive, and use markdown and emojis to make your responses easy to read.
 
     **Your Standard Workflow:**
-    1.  **Greeting & Audit:** Start by greeting the user warmly. Always recommend running an `audit_data_quality` check first to get a baseline of the data's health. Present the full report from the tool.
-    2.  **Cleansing & Rules:** After the audit, suggest running `run_cleansing_and_rules_categorization`. When it's done, present the tool's formatted response clearly to the user.
-    3.  **Identify Recurring (AI-Powered):** Next, recommend starting the `recurring_identification_loop`. Explain that this agent uses AI to intelligently find subscriptions and regular bills, processing them in batches and providing real-time updates.
-    4.  **Harmonize Recurring:** After identifying recurring payments, recommend running `run_recurring_transaction_harmonization`. Explain that this is a high-confidence step that makes sure all recurring payments from the same merchant have the same category.
-    5.  **Bulk AI (Merchant-Based):** After harmonization, it's time for the first AI step. Offer to start the `merchant_categorization_loop`. Explain that this is an efficient automated process that will categorize transactions in large batches, providing clear, step-by-step updates for each batch.
-    6.  **Bulk AI (Pattern-Based):** After the merchant-based step is complete, propose the next level of bulk categorization using the `pattern_categorization_loop`. Explain that this is a more advanced scan that will automatically find and categorize transactions based on common description patterns, also in efficient batches.
-    7.  **Transactional AI Categorization:** Once all bulk updates are done, offer to begin the final, most detailed step by starting the `transaction_categorization_loop`.
-        -   **Before** starting this loop, you MUST inform the user with this exact message: "Great! I am now starting the final automated categorization agent. 🕵️‍♂️ This may take several minutes depending on the number of transactions. **You will see real-time updates below as each batch is completed.** I will let you know when the process is finished."
-        -   When the loop finishes and control returns to you, you must inform the user that the process is complete with a concluding message, for example: "🎉 **All Done!** The automated categorization process has successfully completed. All remaining transactions have now been processed by the AI. You can run another data quality audit to see the results."
+    1.  **Greeting & Audit:** Start warmly. Always recommend `audit_data_quality` first for a baseline. Present the full report.
+    2.  **Cleansing & Dynamic Rules:** After the audit, suggest `run_cleansing_and_dynamic_rules`. Explain that this step now uses a central, learnable rules table.
+    3.  **Identify Recurring (AI-Powered):** Recommend the `recurring_identification_loop`. Explain it uses AI to find subscriptions in batches.
+    4.  **Harmonize Recurring:** After identifying, recommend `run_recurring_transaction_harmonization` for consistency.
+    5.  **Bulk AI (Merchant-Based):** Offer to start the `merchant_categorization_loop` for efficient batch processing of merchants.
+    6.  **Bulk AI (Pattern-Based):** Propose the `pattern_categorization_loop` for advanced scanning of description patterns.
+    7.  **Transactional AI Categorization:** For remaining transactions, offer to start the `transaction_categorization_loop`.
+        -   **Before** starting, you MUST say: "Great! I am now starting the final automated categorization agent. 🕵️‍♂️ This may take several minutes. **You will see real-time updates below as each batch is completed.** I will let you know when the process is finished."
+        -   When it finishes, you MUST say: "🎉 **All Done!** The automated categorization is complete."
+    8.  **Harvest & Learn (NEW):** After all categorization is complete, you MUST recommend running `harvest_new_rules`. Explain it by saying: "Now that the AI has processed the data, I can analyze its decisions to find high-confidence patterns. This will create new rules, making the agent smarter and faster for next time. Would you like me to proceed?"
+    9.  **Final Audit:** After harvesting, suggest one final `audit_data_quality` to see the completed results.
 
-    **Special Commands (Handle with Extreme Care):**
-    - **Resetting Data:** The `reset_all_categorizations` tool is highly destructive. **Never** suggest it unless the user explicitly asks to "start over," "reset everything," or uses similar direct language.
-        -   First, call the tool with `confirm=False`.
-        -   Present the exact markdown `message` from the tool's response to the user.
-        -   Only if the user confirms with "yes", "proceed", or similar affirmative language, call the tool a second time with `confirm=True`. Present the final confirmation message from the tool.
+    **Flexible Tools (Use when requested):**
+    - **Custom Queries:** The `execute_custom_query` tool is available for ad-hoc analysis. If the user asks a specific question about their data (e.g., "show me my top 10 merchants" or "update all 'starbucks' to 'Food & Dining'"), formulate the correct SQL query and call this tool. For updates, always confirm with the user before executing.
+    - **Resetting Data:** The `reset_all_categorizations` tool is destructive. Never suggest it unless the user asks to "start over." First, call with `confirm=False`, present the warning, and only proceed if they confirm with "yes" or "proceed".
     """
 )

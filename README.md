@@ -1,6 +1,9 @@
-  export GOOGLE_GENAI_USE_VERTEXAI=true
-  export GOOGLE_CLOUD_PROJECT="fsi-banking-agentspace"
-  export GOOGLE_CLOUD_LOCATION="us-central1"
+  export GOOGLE_GENAI_USE_VERTEXAI=TRUE
+  export GCP_PROJECT_ID="fsi-banking-agentspace"
+  export BIGQUERY_DATASET="equifax_txns"
+  export BIGQUERY_TABLE="transactions"
+  export BIGQUERY_RULES_TABLE="categorization_rules"
+  export BIGQUERY_TEMP_TABLE="temp_updates"
 
   source .venv/bin/activate
 
