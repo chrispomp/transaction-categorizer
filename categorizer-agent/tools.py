@@ -251,7 +251,10 @@ def apply_categorization_rules() -> str:
             T.category_l2 = U.category_l2,
             T.is_recurring = COALESCE(U.is_recurring_rule, T.is_recurring),
             T.categorization_method = U.method,
-            T.categorization_update_timestamp = CURRENT_TIMESTAMP();
+            T.categorization_update_timestamp = CASE
+                WHEN T.category_l1 IS DISTINCT FROM U.category_l1 OR T.category_l2 IS DISTINCT FROM U.category_l2 THEN CURRENT_TIMESTAMP()
+                ELSE T.categorization_update_timestamp
+            END;
     """
     try:
         job = bq_client.query(rules_sql)

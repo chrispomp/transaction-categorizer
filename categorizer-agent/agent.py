@@ -56,13 +56,17 @@ recurring_identification_loop = LoopAgent(
 
 single_merchant_batch_agent = LlmAgent(
     name="single_merchant_batch_agent",
-    model="gemini-2.5-flash-lite",
+    model="gemini-2.5-flash",
     tools=[get_merchant_batch_to_categorize, apply_bulk_merchant_update],
     instruction=f"""
     Your purpose is to perform one cycle of BATCH merchant-based transaction categorization.
-    1. **FETCH**: Call `get_merchant_batch_to_categorize`. Escalate if complete.
-    2. **ANALYZE & UPDATE**: For ALL merchants in the batch, determine the correct `category_l1` and `category_l2` from: {VALID_CATEGORIES_JSON_STR}. Then, call `apply_bulk_merchant_update` ONCE with a single JSON string. Each merchant object MUST include `merchant_name_cleaned`, `transaction_type`, `category_l1`, and `category_l2`.
-    3. **REPORT**: The tool returns `updated_count` and a `summary`. Create a markdown report, e.g., "🛒 Processed a batch of 3 merchants, updating 112 transactions. Key updates include 'grubhub' to Food & Dining."
+
+    **Your process is a strict, two-step sequence:**
+    1.  **FETCH BATCH**: Call `get_merchant_batch_to_categorize`. If the tool returns a "complete" status, you must stop and escalate.
+    2.  **ANALYZE & UPDATE BATCH**: Analyze the JSON data for ALL merchants in the batch. You **MUST ONLY** use `category_l1` and `category_l2` from this list: {VALID_CATEGORIES_JSON_STR}.
+        - **NON-NEGOTIABLE**: Any category not in this list will be rejected by the tool, and the transaction will not be categorized.
+        - Then, call `apply_bulk_merchant_update` ONCE with a single JSON array. Each merchant object MUST include `merchant_name_cleaned`, `transaction_type`, `category_l1`, and `category_l2`.
+    3.  **REPORT BATCH**: The tool returns `updated_count` and a `summary`. Create a user-friendly markdown report, e.g., "🛒 Processed a batch of 3 merchants, updating 112 transactions. Key updates include 'grubhub' to Food & Dining."
     """,
 )
 
@@ -75,7 +79,7 @@ merchant_categorization_loop = LoopAgent(
 
 single_pattern_batch_agent = LlmAgent(
     name="single_pattern_batch_agent",
-    model="gemini-2.5-flash-lite",
+    model="gemini-2.5-flash",
     tools=[get_pattern_batch_to_categorize, apply_bulk_pattern_update],
     instruction=f"""
     Your purpose is to perform one complete cycle of BATCH pattern-based transaction categorization.
@@ -83,8 +87,9 @@ single_pattern_batch_agent = LlmAgent(
     **Your process is a strict, three-step sequence:**
     1.  **FETCH BATCH:** First, you MUST call `get_pattern_batch_to_categorize` to get a batch of up to 10 pattern groups.
         - If the tool returns a "complete" status, you must stop and escalate.
-    2.  **ANALYZE & UPDATE BATCH:** Analyze the JSON data for ALL patterns. For each one, determine the correct `category_l1` and `category_l2` from the valid list: {VALID_CATEGORIES_JSON_STR}.
-        Then, call `apply_bulk_pattern_update` ONCE. **Your output must be a single JSON array** that includes an entry for every pattern in the batch you received.
+    2.  **ANALYZE & UPDATE BATCH:** Analyze the JSON data for ALL patterns. For each one, you **MUST ONLY** use `category_l1` and `category_l2` from this valid list: {VALID_CATEGORIES_JSON_STR}.
+        - **NON-NEGOTIABLE**: Any category not in this list will be rejected by the tool.
+        - Then, call `apply_bulk_pattern_update` ONCE. Your output must be a single JSON array that includes an entry for every pattern in the batch you received.
     3.  **REPORT BATCH:** The update tool returns `updated_count` and a `summary`. Use this to create a user-friendly markdown report. For example: "🧾 Processed a batch of 5 patterns, updating 88 transactions. This included patterns like 'payment thank you' being set to Credit Card Payment."
     """,
 )
@@ -98,17 +103,23 @@ pattern_categorization_loop = LoopAgent(
 
 single_transaction_categorizer_agent = LlmAgent(
     name="single_transaction_categorizer_agent",
-    model="gemini-2.5-flash-lite",
+    model="gemini-2.5-flash",
     tools=[fetch_batch_for_ai_categorization, update_categorizations_in_bigquery],
     instruction=f"""
     Your purpose is to perform one cycle of detailed, transaction-by-transaction categorization and report the result with enhanced detail.
+
+    **Your process is a strict, three-step sequence:**
     1.  **FETCH**: Call `fetch_batch_for_ai_categorization`. If it returns "complete", escalate immediately.
-    2.  **CATEGORIZE & UPDATE**: Call `update_categorizations_in_bigquery` with a `categorized_json_string`. This string MUST be a JSON array of objects, each with `transaction_id`, `category_l1`, and `category_l2` from the valid list: {VALID_CATEGORIES_JSON_STR}.
-    3.  **REPORT**: The update tool returns `updated_count` and a `summary`. Present this clearly in markdown. Example:
-        "✅ Processed a batch of 198 transactions.
-        - **Shopping**: 75 transactions
-        - **Groceries**: 50 transactions
-        Now moving to the next batch..."
+    2.  **CATEGORIZE & UPDATE**: Call `update_categorizations_in_bigquery` with a `categorized_json_string`.
+        - You **MUST ONLY** use `category_l1` and `category_l2` from this valid list: {VALID_CATEGORIES_JSON_STR}.
+        - **NON-NEGOTIABLE**: Any category not in this list will be rejected, and the transaction will not be categorized.
+        - The JSON string MUST be a JSON array of objects, each with `transaction_id`, `category_l1`, and `category_l2`.
+    3.  **REPORT**: The update tool returns `updated_count` and a `summary`. Present this clearly in markdown.
+        - Example:
+            "✅ Processed a batch of 198 transactions.
+            - **Shopping**: 75 transactions
+            - **Groceries**: 50 transactions
+            Now moving to the next batch..."
     """,
 )
 
@@ -122,7 +133,7 @@ transaction_categorization_loop = LoopAgent(
 # --- Root Orchestrator Agent ---
 root_agent = Agent(
     name="transaction_categorizer_orchestrator",
-    model="gemini-2.5-flash-lite",
+    model="gemini-2.5-flash",
     tools=[
         audit_data_quality,
         reset_all_categorizations,
