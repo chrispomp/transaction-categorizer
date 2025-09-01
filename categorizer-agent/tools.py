@@ -330,7 +330,7 @@ def review_and_resolve_rule_conflicts() -> str:
 
     # Step 3: Use a temporary, in-tool LLM agent to resolve conflicts.
     conflict_resolver_agent = LlmAgent(
-        model="gemini-2.5-flash-lite",
+        model="gemini-2.5-flash",
         instruction="""
         You are a data analyst specializing in financial transaction categorization.
         You will be given a JSON object representing a set of conflicting rules for a single identifier.

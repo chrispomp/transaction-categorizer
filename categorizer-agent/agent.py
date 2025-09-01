@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # --- Loop Agents for Batch Processing ---
 single_recurring_batch_agent = LlmAgent(
     name="single_recurring_batch_agent",
-    model="gemini-2.5-flash-lite",
+    model="gemini-2.5-flash",
     tools=[get_recurring_candidates_batch, apply_bulk_recurring_flags],
     instruction="""
     Your purpose is to perform one cycle of BATCH recurring transaction identification.
@@ -56,15 +56,15 @@ recurring_identification_loop = LoopAgent(
 
 single_merchant_batch_agent = LlmAgent(
     name="single_merchant_batch_agent",
-    model="gemini-2.5-flash-lite",
+    model="gemini-2.5-flash",
     tools=[get_merchant_batch_to_categorize, apply_bulk_merchant_update],
     instruction=f"""
     Your purpose is to perform one cycle of BATCH merchant-based transaction categorization.
 
     **Your process is a strict, two-step sequence:**
     1.  **FETCH BATCH**: Call `get_merchant_batch_to_categorize`. If the tool returns a "complete" status, you must stop and escalate.
-    2.  **ANALYZE & UPDATE BATCH**: Analyze the JSON data for ALL merchants in the batch. You **MUST ONLY** use `category_l1` and `category_l2` from this list: {VALID_CATEGORIES_JSON_STR}.
-        - **NON-NEGOTIABLE**: Any category not in this list will be rejected by the tool, and the transaction will not be categorized.
+    2.  **ANALYZE & UPDATE BATCH**: Analyze the JSON data for ALL merchants in the batch. You **MUST ONLY** use `category_l1` and `category_l2` from this list: {VALID_CATEGORIES_JSON_STR}. Any category not in this list will be rejected by the tool and the transaction will not be categorized.
+        - **NON-NEGOTIABLE**: This is a critical constraint. Do not invent, create, or use any category not explicitly provided.
         - Then, call `apply_bulk_merchant_update` ONCE with a single JSON array. Each merchant object MUST include `merchant_name_cleaned`, `transaction_type`, `category_l1`, and `category_l2`.
     3.  **REPORT BATCH**: The tool returns `updated_count` and a `summary`. Create a user-friendly markdown report, e.g., "🛒 Processed a batch of 3 merchants, updating 112 transactions. Key updates include 'grubhub' to Food & Dining."
     """,
@@ -79,7 +79,7 @@ merchant_categorization_loop = LoopAgent(
 
 single_pattern_batch_agent = LlmAgent(
     name="single_pattern_batch_agent",
-    model="gemini-2.5-flash-lite",
+    model="gemini-2.5-flash",
     tools=[get_pattern_batch_to_categorize, apply_bulk_pattern_update],
     instruction=f"""
     Your purpose is to perform one complete cycle of BATCH pattern-based transaction categorization.
@@ -103,7 +103,7 @@ pattern_categorization_loop = LoopAgent(
 
 single_transaction_categorizer_agent = LlmAgent(
     name="single_transaction_categorizer_agent",
-    model="gemini-2.5-flash-lite",
+    model="gemini-2.5-flash",
     tools=[fetch_batch_for_ai_categorization, update_categorizations_in_bigquery],
     instruction=f"""
     Your purpose is to perform one cycle of detailed, transaction-by-transaction categorization and report the result with enhanced detail.
