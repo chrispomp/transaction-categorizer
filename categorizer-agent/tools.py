@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # --- 3. Tool Definitions ---
 
 # --- Report, Reset, & Custom Query Tools ---
-def audit_data_quality() -> str:
+def get_data_quality_report() -> str:
     """
     Runs a comprehensive data quality audit on the main transaction table.
     Generates a user-friendly markdown report summarizing any findings.
@@ -80,7 +80,7 @@ def audit_data_quality() -> str:
     return results_markdown
 
 
-def reset_all_categorizations(confirm: bool = False) -> str:
+def reset_all_transaction_categorizations(confirm: bool = False) -> str:
     """
     A destructive tool to reset all categorization and cleansing fields in the table.
     Requires explicit confirmation to proceed.
@@ -100,7 +100,7 @@ def reset_all_categorizations(confirm: bool = False) -> str:
         logger.error(f"❌ BigQuery error during reset operation: {e}")
         return f"❌ **Error During Reset**\nA BigQuery error occurred during the reset operation. Please check the logs. Error: {e}"
 
-def execute_custom_query(query: str) -> str:
+def run_custom_bigquery_query(query: str) -> str:
     """
     Executes a user-provided SQL query against the transaction data.
     Primarily for SELECT statements to perform custom analysis.
@@ -137,7 +137,7 @@ def execute_custom_query(query: str) -> str:
 
 # --- Phase 1: Dynamic Rules-Based Tools ---
 
-def run_data_cleansing() -> str:
+def cleanse_transaction_data() -> str:
     """
     Cleanses the raw merchant and description fields for all transactions that haven't been cleaned yet.
     This involves converting to lowercase and removing special characters.
@@ -180,7 +180,7 @@ def run_data_cleansing() -> str:
         return f"❌ **Error During Data Cleansing**\nA BigQuery error occurred. Please check the logs. Error: {e}"
 
 
-def apply_categorization_rules() -> str:
+def apply_rules_based_categorization() -> str:
     """
     Applies categorization rules from the dedicated rules table.
     Rules can set categories (l1/l2) and the is_recurring flag.
@@ -384,7 +384,7 @@ def review_and_resolve_rule_conflicts() -> str:
         return f"❌ Error applying rule resolutions: {e}"
 
 
-def run_recurring_transaction_harmonization() -> str:
+def harmonize_recurring_transaction_categories() -> str:
     """
     Applies trusted categories from categorized recurring transactions to uncategorized
     recurring transactions from the same merchant.
@@ -454,7 +454,7 @@ def run_recurring_transaction_harmonization() -> str:
 
 # --- Phase 2 & 3: AI-Based Bulk & Recurring Tools ---
 
-def get_recurring_candidates_batch(tool_context: ToolContext, batch_size: int = 200) -> str:
+def get_recurring_transaction_candidates(tool_context: ToolContext, batch_size: int = 200) -> str:
     """
     Fetches a batch of merchants that are potential candidates for being recurring.
     Gathers evidence like transaction counts, amount stability, and time intervals.
@@ -519,7 +519,7 @@ def get_recurring_candidates_batch(tool_context: ToolContext, batch_size: int = 
         tool_context.actions.escalate = True
         return json.dumps({"status": "error", "message": str(e)})
 
-def apply_bulk_recurring_flags(categorized_json_string: str) -> str:
+def flag_recurring_transactions_in_bulk(categorized_json_string: str) -> str:
     """Applies the 'is_recurring' flag to merchants identified by the LLM."""
     logger.info("Applying bulk recurring flags...")
     
@@ -571,7 +571,7 @@ def apply_bulk_recurring_flags(categorized_json_string: str) -> str:
         logger.error(f"❌ BigQuery error during bulk recurring flag update: {e}")
         return json.dumps({"status": "error", "message": str(e)})
 
-def get_merchant_batch_to_categorize(tool_context: ToolContext, batch_size: int = 150) -> str:
+def get_uncategorized_merchants_batch(tool_context: ToolContext, batch_size: int = 150) -> str:
     """
     Fetches a batch of the most frequent uncategorized merchants for efficient bulk processing.
     """
@@ -660,7 +660,7 @@ def apply_bulk_merchant_update(categorized_json_string: str) -> str:
         logger.error(f"❌ BigQuery error during bulk merchant update: {e}")
         return json.dumps({"status": "error", "message": str(e)})
 
-def get_pattern_batch_to_categorize(tool_context: ToolContext, batch_size: int = 20) -> str:
+def get_uncategorized_patterns_batch(tool_context: ToolContext, batch_size: int = 20) -> str:
     """Fetches a batch of the most frequent uncategorized transaction patterns for efficient bulk processing."""
     logger.info(f"Fetching batch of {batch_size} patterns for bulk categorization...")
     query = f"""
@@ -754,7 +754,7 @@ def apply_bulk_pattern_update(categorized_json_string: str) -> str:
 
 
 # --- Phase 4: Transaction-Level AI & Learning Tools ---
-def fetch_batch_for_ai_categorization(tool_context: ToolContext, batch_size: int = 200, transaction_type: Optional[str] = None) -> str:
+def get_transaction_batch_for_ai_categorization(tool_context: ToolContext, batch_size: int = 200, transaction_type: Optional[str] = None) -> str:
     """
     Fetches a batch of individual uncategorized transactions for detailed, row-by-row AI processing.
     Can be filtered by transaction type.
@@ -794,7 +794,7 @@ def fetch_batch_for_ai_categorization(tool_context: ToolContext, batch_size: int
         return json.dumps({"status": "error", "message": f"Failed to fetch data: {e}"})
 
 
-def update_categorizations_in_bigquery(categorized_json_string: str) -> str:
+def update_transactions_with_ai_categories(categorized_json_string: str) -> str:
     """
     Updates the main BigQuery table with categories provided by the AI, and returns a detailed summary.
     """
@@ -843,7 +843,7 @@ def update_categorizations_in_bigquery(categorized_json_string: str) -> str:
         logger.error(f"❌ BigQuery error during update: {e}")
         return json.dumps({"status": "error", "message": f"Failed to update BigQuery: {e}"})
 
-def harvest_new_rules() -> str:
+def learn_new_categorization_rules() -> str:
     """
     Identifies high-confidence categories from AI processing for both MERCHANTS and PATTERNS
     and saves them as new rules for future use. It also learns the is_recurring status.
@@ -969,7 +969,7 @@ def harvest_new_rules() -> str:
         return f"❌ **Error During Learning**: An error occurred while trying to save new rules. Please check the logs. Error: {e}"
 
 
-def add_rule_to_table(
+def create_new_categorization_rule(
     identifier: str,
     rule_type: str,
     category_l1: str,
@@ -1061,3 +1061,47 @@ def add_rule_to_table(
     except (GoogleAPICallError, Exception) as e:
         logger.error(f"❌ BigQuery error during custom rule creation: {e}")
         return f"❌ **Error Creating Rule**: An error occurred while trying to create the rule. Please check the logs. Error: {e}"
+
+
+def apply_fallback_categorization() -> str:
+    """
+    Applies a fallback category to any transactions that are still uncategorized.
+    - Credits are categorized as 'Income' / 'Other Income'.
+    - Debits are categorized as 'Expense' / 'Other Expense'.
+    """
+    logger.info("Applying fallback categorization for remaining uncategorized transactions...")
+    fallback_sql = f"""
+    MERGE `{TABLE_ID}` T
+    USING (
+        SELECT
+            transaction_id,
+            CASE
+                WHEN transaction_type = 'Credit' THEN 'Income'
+                WHEN transaction_type = 'Debit' THEN 'Expense'
+            END AS new_category_l1,
+            CASE
+                WHEN transaction_type = 'Credit' THEN 'Other Income'
+                WHEN transaction_type = 'Debit' THEN 'Other Expense'
+            END AS new_category_l2
+        FROM `{TABLE_ID}`
+        WHERE category_l1 IS NULL OR category_l2 IS NULL
+    ) AS U ON T.transaction_id = U.transaction_id
+    WHEN MATCHED THEN
+        UPDATE SET
+            T.category_l1 = U.new_category_l1,
+            T.category_l2 = U.new_category_l2,
+            T.categorization_method = 'fallback',
+            T.categorization_update_timestamp = CURRENT_TIMESTAMP();
+    """
+    try:
+        query_job = bq_client.query(fallback_sql)
+        query_job.result()
+        affected_rows = query_job.num_dml_affected_rows or 0
+        logger.info("✅ Fallback categorization complete. %d rows affected.", affected_rows)
+        if affected_rows > 0:
+            return f"✅ **Fallback Complete**\n\nApplied default categories to **{affected_rows}** remaining uncategorized transactions."
+        else:
+            return "✅ **Fallback Complete**\n\nNo transactions required fallback categorization."
+    except GoogleAPICallError as e:
+        logger.error(f"❌ BigQuery error during fallback categorization: {e}")
+        return f"❌ **Error During Fallback Categorization**\nA BigQuery error occurred. Please check the logs. Error: {e}"
