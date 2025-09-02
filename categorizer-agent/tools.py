@@ -777,7 +777,7 @@ def fetch_batch_for_ai_categorization(tool_context: ToolContext, batch_size: int
         fetch_sql += f" AND transaction_type = '{transaction_type}'"
 
     # Add the limit
-    fetch_sql += f"\\nLIMIT {batch_size};"
+    fetch_sql += f" LIMIT {batch_size};"
 
     try:
         df = bq_client.query(fetch_sql).to_dataframe()
