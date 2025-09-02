@@ -199,7 +199,7 @@ txn_categorization_controller = LlmAgent(
 # --- Root Orchestrator Agent ---
 financial_transaction_categorizer = Agent(
     name="financial_transaction_categorizer",
-    model="gemini-2.5-flash-lite",
+    model="gemini-2.5-flash",
     tools=[
         get_data_quality_report,
         reset_all_transaction_categorizations,
