@@ -1,6 +1,6 @@
 # Generates high-fidelity, narratively cohesive synthetic data for testing
 # AI/ML models for credit scoring based on transaction history.
-# Version 7.0 - Added 3 new personas and optimized prompt engineering.
+# Version 7.1 - Optimized raw description generation for more realism.
 
 import os
 import json
@@ -200,7 +200,7 @@ def clean_description(raw_desc: str) -> str:
 TRANSACTION_SCHEMA_FOR_LLM = {
     "type": "array", "items": {
         "type": "object", "properties": {
-            "description_raw": {"type": "string", "description": "A realistic, varied, raw transaction description."},
+            "description_raw": {"type": "string", "description": "The complete, raw transaction line item. MUST include extra details beyond just the merchant name, such as transaction prefixes (SQ*, TST*), store numbers, location, or reference codes."},
             "merchant_name_raw": {"type": "string", "description": "The raw merchant name as extracted from the description (e.g., 'SQ *BLUE BOTTLE COFFEE #B12')."},
             "merchant_name_cleaned": {"type": "string", "description": "The cleaned, canonical merchant name (e.g., 'Blue Bottle Coffee')."},
             "category_l2": {"type": "string", "description": "The detailed sub-category of the transaction."}
@@ -243,9 +243,9 @@ def build_monthly_prompt(profile: Dict, month_date: datetime, transactions_this_
     - **Persona Focus:** Generate transactions reflecting spending in categories like: {', '.join(persona_categories)}. Income should primarily come from sources like: {', '.join(persona['income_merchants'])}.
     - **Monthly Narrative:** {narrative_block}
     **CRITICAL INSTRUCTIONS:**
-    1.  For each transaction, provide a `description_raw`, `merchant_name_raw`, `merchant_name_cleaned`, and `category_l2`.
-    2.  **The `merchant_name_raw` MUST be consistent with the `description_raw`.**
-    3.  **The `merchant_name_cleaned` MUST be the canonical, recognizable name of the business.**
+    1.  **Differentiate Descriptions:** The `description_raw` MUST be more detailed than `merchant_name_raw`. It should contain the merchant name plus other realistic data like store numbers, transaction type prefixes (e.g. 'SQ *', 'POS DEBIT'), locations, or reference IDs.
+    2.  The `merchant_name_raw` MUST be a logical, consistent part of the `description_raw`.
+    3.  The `merchant_name_cleaned` MUST be the canonical, recognizable name of the business.
     4.  For income, use `category_l2`: "Income", "Refund", or "Other Income".
     5.  Do NOT generate predictable monthly bills; they are handled separately.
     6.  The entire output MUST be ONLY the raw JSON array, conforming strictly to the provided schema. Ensure all strings are properly escaped.

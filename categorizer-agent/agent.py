@@ -83,8 +83,8 @@ merchant_categorization_agent = LlmAgent(
             - category_l1 can only be either "Income", "Expense" or "Transfer".
             - category_l2 can only be:
                 - when category_l1 is "Income": "Gig Income", "Payroll", "Other Income", "Refund"
-                - when category_l1 is"Expense": "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services"
-                - when category_l1 is"Transfer": "Credit Card Payment", "Internal Transfer"
+                - when category_l1 is"Expense": "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
+                - when category_l1 is"Transfer": "Credit Card Payment", "Internal Transfer", "ATM Withdrawal"
         - **NON-NEGOTIABLE**: This is a critical constraint. Do not invent, create, or use any category not explicitly provided.
         - Then, call `apply_bulk_merchant_update` ONCE with a single JSON array. Each merchant object MUST include `merchant_name_cleaned`, `transaction_type`, `category_l1`, and `category_l2`.
     3.  **REPORT BATCH**: The tool returns `updated_count` and a `summary`. Create an insightful, data-driven markdown report. Example: "**🛒 Merchant Batch Categorized**\n\nI processed a batch of **3** merchants, updating **112** transactions. Key updates include:\n- 'grubhub' -> Food & Dining\n- 'shell' -> Auto & Transport"
@@ -119,9 +119,9 @@ pattern_categorization_agent = LlmAgent(
         * **`category_l1`: "Income"**
             * `category_l2`: "Gig Income", "Payroll", "Other Income", "Refund"
         * **`category_l1`: "Expense"**
-            * `category_l2`: "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services"
+            * `category_l2`: "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
         * **`category_l1`: "Transfer"**
-            * `category_l2`: "Credit Card Payment", "Internal Transfer"
+            * `category_l2`: "Credit Card Payment", "Internal Transfer", "ATM Withdrawal"
     * Use the `persona_type` to inform your categorization. For example, a "Full-Time Rideshare Driver" might have income from "UBER" or "LYFT" that should be categorized as "Gig Income", not "Payroll".
 
     ### 3. Apply Bulk Update
@@ -165,6 +165,12 @@ individual_transaction_categorizer_agent = LlmAgent(
     3.  **Analyze & Categorize:**
         * If the tool returns "complete", escalate immediately.
         * For each transaction, assign `category_l1` and `category_l2` based **strictly** on this list: {VALID_CATEGORIES_JSON_STR}.
+        * **CRITICAL**: You **MUST ONLY** use `category_l1` and `category_l2` from this valid list: {VALID_CATEGORIES_JSON_STR}.
+            - category_l1 can only be either "Income", "Expense" or "Transfer".
+            - category_l2 can only be:
+                - when category_l1 is "Income": "Gig Income", "Payroll", "Other Income", "Refund"
+                - when category_l1 is"Expense": "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
+                - when category_l1 is"Transfer": "Credit Card Payment", "Internal Transfer", "ATM Withdrawal"
         * Use the `persona_type` to inform your categorization. For example, a "Full-Time Rideshare Driver" might have income from "UBER" or "LYFT" that should be categorized as "Gig Income", not "Payroll".
     4.  **Update Batch:** Call `update_transactions_with_ai_categories` **once** with all your categorizations for the batch.
     5.  **Report Summary:** Use the `summary` from the update tool to create a data-driven and visually appealing markdown report. Include the number of transactions categorized and a breakdown of the top categories. Example: '**Transaction Batch Processed**\n\nSuccessfully categorized **150** debit transactions. Top categories assigned:\n- Shopping: 45 transactions\n- Food & Dining: 32 transactions\n- Bills & Utilities: 25 transactions'
