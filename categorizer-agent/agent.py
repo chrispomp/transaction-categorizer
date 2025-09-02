@@ -65,6 +65,12 @@ single_merchant_batch_agent = LlmAgent(
     **Your process is a strict, two-step sequence:**
     1.  **FETCH BATCH**: Call `get_merchant_batch_to_categorize`. If the tool returns a "complete" status, you must stop and escalate.
     2.  **ANALYZE & UPDATE BATCH**: Analyze the JSON data for ALL merchants in the batch. You **MUST ONLY** use `category_l1` and `category_l2` from this list: {VALID_CATEGORIES_JSON_STR}. Any category not in this list will be rejected by the tool and the transaction will not be categorized.
+            - **CRITICAL**: You **MUST ONLY** use `category_l1` and `category_l2` from this valid list: {VALID_CATEGORIES_JSON_STR}.
+            - category_l1 can only be either "Income", "Expense" or "Transfer".
+            - category_l2 can only be:
+                - when category_l1 is "Income": "Gig Income", "Payroll", "Other Income", "Refund"
+                - when category_l1 is"Expense": "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services"
+                - when category_l1 is"Transfer": "Credit Card Payment", "Internal Transfer"
         - **NON-NEGOTIABLE**: This is a critical constraint. Do not invent, create, or use any category not explicitly provided.
         - Then, call `apply_bulk_merchant_update` ONCE with a single JSON array. Each merchant object MUST include `merchant_name_cleaned`, `transaction_type`, `category_l1`, and `category_l2`.
     3.  **REPORT BATCH**: The tool returns `updated_count` and a `summary`. Create a user-friendly markdown report, e.g., "🛒 Processed a batch of 3 merchants, updating 112 transactions. Key updates include 'grubhub' to Food & Dining."
@@ -90,6 +96,12 @@ single_pattern_batch_agent = LlmAgent(
     1.  **FETCH BATCH:** First, you MUST call `get_pattern_batch_to_categorize` to get a batch of up to 20 pattern groups.
         - If the tool returns a "complete" status, you must stop and escalate.
     2.  **ANALYZE & UPDATE BATCH:** Analyze the JSON data for ALL patterns. For each one, you **MUST ONLY** use `category_l1` and `category_l2` from this valid list: {VALID_CATEGORIES_JSON_STR}.
+            - **CRITICAL**: You **MUST ONLY** use `category_l1` and `category_l2` from this valid list: {VALID_CATEGORIES_JSON_STR}.
+            - category_l1 can only be either "Income", "Expense" or "Transfer".
+            - category_l2 can only be:
+                - when category_l1 is "Income": "Gig Income", "Payroll", "Other Income", "Refund"
+                - when category_l1 is"Expense": "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services"
+                - when category_l1 is"Transfer": "Credit Card Payment", "Internal Transfer"
         - **NON-NEGOTIABLE**: Any category not in this list will be rejected by the tool.
         - Then, call `apply_bulk_pattern_update` ONCE. Your output must be a single JSON array that includes an entry for every pattern in the batch you received.
     3.  **REPORT BATCH:** The update tool returns `updated_count` and a `summary`. Use this to create a user-friendly markdown report. For example: "🧾 Processed a batch of 5 patterns, updating 88 transactions. This included patterns like 'payment thank you' being set to Credit Card Payment."
@@ -106,7 +118,7 @@ pattern_categorization_loop.sub_agents.append(single_pattern_batch_agent)
 
 single_transaction_categorizer_agent = LlmAgent(
     name="single_transaction_categorizer_agent",
-    model="gemini-2.5-flash-lite",
+    model="gemini-2.5-flash",
     tools=[fetch_batch_for_ai_categorization, update_categorizations_in_bigquery],
     instruction=f"""
     Your purpose is to perform one cycle of detailed, transaction-by-transaction categorization and report the result with enhanced detail.
@@ -115,6 +127,11 @@ single_transaction_categorizer_agent = LlmAgent(
     1.  **FETCH**: Call `fetch_batch_for_ai_categorization`. If it returns "complete", escalate immediately.
     2.  **CATEGORIZE & UPDATE**: Call `update_categorizations_in_bigquery` with a `categorized_json_string`.
         - **CRITICAL**: You **MUST ONLY** use `category_l1` and `category_l2` from this valid list: {VALID_CATEGORIES_JSON_STR}.
+            - category_l1 can only be either "Income", "Expense" or "Transfer".
+            - category_l2 can only be:
+                - when category_l1 is "Income": "Gig Income", "Payroll", "Other Income", "Refund"
+                - when category_l1 is"Expense": "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services"
+                - when category_l1 is"Transfer": "Credit Card Payment", "Internal Transfer"
         - **NON-NEGOTIABLE**: Do not invent, create, or use any category not explicitly provided. For example, do not create subcategories like 'Restaurants' for 'Food & Dining'. You must use one of the existing, valid L2 categories. Any category not in the list will be rejected.
         - The JSON string MUST be a JSON array of objects, each with `transaction_id`, `category_l1`, and `category_l2`.
     3.  **REPORT**: The update tool returns `updated_count` and a `summary`. Present this clearly in markdown.

@@ -752,7 +752,7 @@ def apply_bulk_pattern_update(categorized_json_string: str) -> str:
 
 
 # --- Phase 4: Transaction-Level AI & Learning Tools ---
-def fetch_batch_for_ai_categorization(tool_context: ToolContext, batch_size: int = 100) -> str:
+def fetch_batch_for_ai_categorization(tool_context: ToolContext, batch_size: int = 300) -> str:
     """Fetches a batch of individual uncategorized transactions for detailed, row-by-row AI processing."""
     logger.info(f"Fetching batch for AI categorization with enriched context. Batch size: {batch_size}")
     fetch_sql = f"""
