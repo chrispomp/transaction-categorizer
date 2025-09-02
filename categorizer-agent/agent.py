@@ -83,8 +83,8 @@ single_merchant_batch_agent = LlmAgent(
             - category_l1 can only be either "Income", "Expense" or "Transfer".
             - category_l2 can only be:
                 - when category_l1 is "Income": "Gig Income", "Payroll", "Other Income", "Refund"
-                - when category_l1 is"Expense": "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services"
-                - when category_l1 is"Transfer": "Credit Card Payment", "Internal Transfer"
+                - when category_l1 is "Expense": "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense"
+                - when category_l1 is "Transfer": "Credit Card Payment", "Internal Transfer", "ATM Withdrawal"
         - **NON-NEGOTIABLE**: This is a critical constraint. Do not invent, create, or use any category not explicitly provided.
         - Then, call `apply_bulk_merchant_update` ONCE with a single JSON array. Each merchant object MUST include `merchant_name_cleaned`, `transaction_type`, `category_l1`, and `category_l2`.
     3.  **REPORT BATCH**: The tool returns `updated_count` and a `summary`. Create a user-friendly markdown report, e.g., "🛒 Processed a batch of 3 merchants, updating 112 transactions. Key updates include 'grubhub' to Food & Dining."
@@ -149,77 +149,33 @@ pattern_categorization_loop = LoopAgent(
 )
 pattern_categorization_loop.sub_agents.append(single_pattern_batch_agent)
 
-# --- Credit Transaction Categorization Loop ---
-credit_transaction_categorizer_agent = LlmAgent(
-    name="credit_transaction_categorizer_agent",
+# --- Transaction-Level AI Categorization Loop ---
+transaction_categorizer_agent = LlmAgent(
+    name="transaction_categorizer_agent",
     model="gemini-2.5-flash",
     tools=[fetch_batch_for_ai_categorization, update_categorizations_in_bigquery],
     instruction=f"""
-    You are a meticulous data analyst specializing in financial transaction categorization. Your purpose is to categorize one batch of CREDIT transactions with perfect accuracy.
+    You are an expert financial analyst. Your task is to accurately categorize a batch of financial transactions based on the provided data. You must follow the instructions precisely.
 
-    **Instructions:**
+    **Workflow:**
 
-    1.  **Fetch Credit Transactions:**
-        * Initiate by calling `fetch_batch_for_ai_categorization` with `transaction_type='Credit'`.
+    1.  **Fetch Batch:**
+        * Call `fetch_batch_for_ai_categorization` to get a batch of transactions. The `transaction_type` will be specified by the orchestrator.
 
-    2.  **Process the Batch:**
-        * **Completion Check:** If the tool returns "complete", your task is finished. You MUST stop and escalate immediately.
+    2.  **Analyze & Categorize Batch:**
+        * **Completion Check:** If the tool returns a "complete" status, you MUST stop and escalate. This indicates no more transactions of that type are available.
         * **Empty Batch Check:** If the tool returns an empty list, report that no transactions were found and stop.
-        * **Categorization:** For each transaction, assign a category from the official list.
-            * **CRITICAL:** You MUST ONLY use a valid category from this list: {VALID_CATEGORIES_JSON_STR}. Do not invent or use any other category.
-            * **FALLBACK RULE:** If a transaction is clearly income but does not fit perfectly into 'Payroll' or 'Gig Income', you **MUST** categorize it under `L1='Income'` and `L2='Other Income'`. This is your only fallback option.
+        * **Categorization Logic:** For each transaction in the batch, you must assign a `category_l1` and `category_l2`.
+            * **CRITICAL CONSTRAINT:** Your choices **MUST** be from this exact list: {VALID_CATEGORIES_JSON_STR}.
+            * Do not invent, modify, or use any category not on this list.
+            * Analyze the `description_cleaned`, `merchant_name_cleaned`, and `amount` to make the most accurate decision.
 
-    3.  **Update Records:**
-        * Once all transactions are categorized, call `update_categorizations_in_bigquery` once for the entire batch.
+    3.  **Update Batch:**
+        * After categorizing **ALL** transactions in the batch, call `update_categorizations_in_bigquery` **ONCE** with the complete list of categorized transactions.
 
     4.  **Report Summary:**
-        * The tool will return a `summary`. Present this clearly in markdown.
-        * **Example Report:**
-            ```markdown
-            ### Credit Transaction Batch Processed
-            * **Status:** ✅ Success
-            * **Transactions Processed:** 50
-            * **Category Breakdown:**
-                * Payroll: 20
-                * Other Income: 30
-            ```
-    """,
-)
-
-credit_categorization_loop = LoopAgent(
-    name="credit_categorization_loop",
-    description="This agent processes all CREDIT transactions in batches, providing a summary for each.",
-    max_iterations=50
-)
-credit_categorization_loop.sub_agents.append(credit_transaction_categorizer_agent)
-
-
-# --- Debit Transaction Categorization Loop ---
-debit_transaction_categorizer_agent = LlmAgent(
-    name="debit_transaction_categorizer_agent",
-    model="gemini-2.5-flash",
-    tools=[fetch_batch_for_ai_categorization, update_categorizations_in_bigquery],
-    instruction=f"""
-    You are a meticulous data analyst specializing in financial transaction categorization. Your purpose is to categorize one batch of DEBIT transactions with perfect accuracy.
-
-    **Instructions:**
-
-    1.  **Fetch Debit Transactions:**
-        * Initiate by calling `fetch_batch_for_ai_categorization` with `transaction_type='Debit'`.
-
-    2.  **Process the Batch:**
-        * **Completion Check:** If the tool returns "complete", your task is finished. You MUST stop and escalate immediately.
-        * **Empty Batch Check:** If the tool returns an empty list, report that no transactions were found and stop.
-        * **Categorization:** For each transaction, assign a category from the official list.
-            * **CRITICAL:** You MUST ONLY use a valid category from this list: {VALID_CATEGORIES_JSON_STR}. Do not invent or use any other category.
-            * **FALLBACK RULE:** If a transaction is clearly an expense but does not fit perfectly into any specific category, you **MUST** categorize it under `L1='Expense'` and `L2='Other Expense'`. This is your only fallback option.
-
-    3.  **Update Records:**
-        * Once all transactions are categorized, call `update_categorizations_in_bigquery` once for the entire batch.
-
-    4.  **Report Summary:**
-        * The tool will return a `summary`. Present this clearly in markdown.
-        * **Example Report:**
+        * The update tool will return a `summary`. Use this to create a clear, user-friendly markdown report.
+        * **Example Report (for a Debit batch):**
             ```markdown
             ### Debit Transaction Batch Processed
             * **Status:** ✅ Success
@@ -227,22 +183,18 @@ debit_transaction_categorizer_agent = LlmAgent(
             * **Category Breakdown:**
                 * Shopping: 75
                 * Groceries: 50
+                * Auto & Transport: 25
             ```
     """,
 )
 
-debit_categorization_loop = LoopAgent(
-    name="debit_categorization_loop",
-    description="This agent processes all DEBIT transactions in batches, providing a summary for each.",
-    max_iterations=100
+transaction_categorization_loop = LoopAgent(
+    name="transaction_categorization_loop",
+    description="This agent processes all remaining CREDIT and DEBIT transactions in batches, providing a summary for each.",
+    max_iterations=150 # Total iterations for both credit and debit runs
 )
-debit_categorization_loop.sub_agents.append(debit_transaction_categorizer_agent)
-debit_categorization_loop = LoopAgent(
-    name="debit_categorization_loop",
-    description="This agent processes all DEBIT transactions in batches, providing a summary for each.",
-    max_iterations=100
-)
-debit_categorization_loop.sub_agents.append(debit_transaction_categorizer_agent)
+# The loop will first process all credit transactions, then all debit transactions.
+transaction_categorization_loop.sub_agents.append(transaction_categorizer_agent)
 
 
 # --- Root Orchestrator Agent ---
@@ -262,8 +214,7 @@ root_agent = Agent(
         AgentTool(agent=recurring_identification_loop),
         AgentTool(agent=merchant_categorization_loop),
         AgentTool(agent=pattern_categorization_loop),
-        AgentTool(agent=credit_categorization_loop), 
-        AgentTool(agent=debit_categorization_loop), 
+        AgentTool(agent=transaction_categorization_loop),
     ],
     instruction=f"""
     You are an elite financial transaction data analyst 🤖. Your purpose is to help users categorize their financial transactions using a powerful and efficient workflow.
@@ -289,9 +240,8 @@ root_agent = Agent(
             - **Step 3: Rules Application:** Call `apply_categorization_rules`.
             - **Step 4: AI Merchant Categorization:** Call the `merchant_categorization_loop` agent.
             - **Step 5: AI Pattern Categorization:** Call the `pattern_categorization_loop` agent.
-            - **Step 6: AI Credit Transaction Categorization:** Call the `credit_categorization_loop` agent to process all income and credit-related transactions.
-            - **Step 7: AI Debit Transaction Categorization:** Call the `debit_categorization_loop` agent to process all expense and debit-related transactions.
-            - **Step 8: Learn New Rules:** Call `harvest_new_rules` to learn from the AI's work.
+            - **Step 6: AI Transaction-Level Categorization:** Call the `transaction_categorization_loop` agent. This agent will first process all remaining credit transactions and then all remaining debit transactions.
+            - **Step 7: Learn New Rules:** Call `harvest_new_rules` to learn from the AI's work.
             - After the final step, provide a concluding summary.
         - If the user chooses **3 (Analyze Recurring Transactions)**, you must execute the dedicated recurring analysis workflow. You MUST follow this order and report on the outcome of each step.
             - **Step 1: AI Recurring Identification:** Call the `recurring_identification_loop` agent.
