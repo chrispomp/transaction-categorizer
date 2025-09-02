@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # --- Loop Agents for Batch Processing ---
 recurring_transaction_identifier_agent = LlmAgent(
     name="recurring_transaction_identifier_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     tools=[get_recurring_transaction_candidates, flag_recurring_transactions_in_bulk],
     instruction="""
     Your purpose is to perform one cycle of BATCH recurring transaction identification.
@@ -57,7 +57,7 @@ recurring_transaction_identification_workflow = LoopAgent(
 
 merchant_categorization_agent = LlmAgent(
     name="merchant_categorization_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     tools=[get_uncategorized_merchants_batch, apply_bulk_merchant_update],
     instruction=f"""
     Your purpose is to perform one cycle of BATCH merchant-based transaction categorization. You are an expert at analyzing transaction data and assigning precise categories.
@@ -100,7 +100,7 @@ merchant_categorization_workflow = LoopAgent(
 
 pattern_categorization_agent = LlmAgent(
     name="pattern_categorization_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     tools=[get_uncategorized_patterns_batch, apply_bulk_pattern_update],
     instruction=f"""
     You are a meticulous data analyst specializing in identifying and categorizing financial transaction patterns. Your purpose is to process one batch of transaction patterns accurately and efficiently.
@@ -153,7 +153,7 @@ pattern_categorization_workflow = LoopAgent(
 # transactions based on the initial prompt it receives from its parent controller.
 individual_transaction_categorizer_agent = LlmAgent(
     name="individual_transaction_categorizer_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     tools=[get_transaction_batch_for_ai_categorization, update_transactions_with_ai_categories],
     instruction=f"""
     You are an expert financial analyst. Your goal is to categorize a batch of transactions.
@@ -169,20 +169,20 @@ individual_transaction_categorizer_agent = LlmAgent(
     """,
 )
 
-# --- OPTIMIZATION: A Loop to run the Categorizer ---
+# --- A Loop to run the Categorizer ---
 # This loop simply runs the categorizer agent repeatedly. The logic of what
 # type of transaction to process is now handled by the agent's instructions.
 individual_transaction_categorization_workflow = LoopAgent(
     name="individual_transaction_categorization_workflow",
     description="This is a worker agent that processes batches of transactions of a specific type (credit or debit).",
     sub_agents=[individual_transaction_categorizer_agent],
-    max_iterations=100 # High iteration count to process all transactions of a given type.
+    max_iterations=20 # High iteration count to process all transactions of a given type.
 )
 
-# --- OPTIMIZATION: Controller Agent to Manage Credit/Debit Runs ---
+# --- Controller Agent to Manage Credit/Debit Runs ---
 txn_categorization_controller = LlmAgent(
     name="txn_categorization_controller",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     tools=[AgentTool(agent=individual_transaction_categorization_workflow)],
     instruction="""
     You are a workflow orchestrator. Your sole responsibility is to categorize all remaining credit and debit transactions by running the `individual_transaction_categorization_workflow` agent in two distinct phases.
@@ -199,7 +199,7 @@ txn_categorization_controller = LlmAgent(
 # --- Root Orchestrator Agent ---
 financial_transaction_categorizer = Agent(
     name="financial_transaction_categorizer",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     tools=[
         get_data_quality_report,
         reset_all_transaction_categorizations,

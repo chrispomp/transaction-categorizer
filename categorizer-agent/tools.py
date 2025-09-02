@@ -332,7 +332,7 @@ def review_and_resolve_rule_conflicts() -> str:
 
     # Step 3: Use a temporary, in-tool LLM agent to resolve conflicts.
     conflict_resolver_agent = LlmAgent(
-        model="gemini-2.5-flash",
+        model="gemini-2.5-flash-lite",
         instruction="""
         You are a data analyst specializing in financial transaction categorization.
         You will be given a JSON object representing a set of conflicting rules for a single identifier.
@@ -660,7 +660,7 @@ def apply_bulk_merchant_update(categorized_json_string: str) -> str:
         logger.error(f"❌ BigQuery error during bulk merchant update: {e}")
         return json.dumps({"status": "error", "message": str(e)})
 
-def get_uncategorized_patterns_batch(tool_context: ToolContext, batch_size: int = 30) -> str:
+def get_uncategorized_patterns_batch(tool_context: ToolContext, batch_size: int = 50) -> str:
     """Fetches a batch of the most frequent uncategorized transaction patterns for efficient bulk processing."""
     logger.info(f"Fetching batch of {batch_size} patterns for bulk categorization...")
     query = f"""
