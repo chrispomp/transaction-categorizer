@@ -48,7 +48,7 @@ except (GoogleAPICallError, Exception) as e:
 
 # --- 2. Constants & Validation ---
 VALID_CATEGORIES = {
-    "Income": ["Gig Income", "Payroll", "Other Income"],
+    "Income": ["Gig Income", "Payroll", "Other Income", "Refund"],
     "Expense": [
         "Groceries", "Food & Dining", "Shopping", "Entertainment",
         "Health & Wellness", "Auto & Transport", "Travel & Vacation",

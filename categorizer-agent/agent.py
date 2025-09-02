@@ -106,7 +106,7 @@ pattern_categorization_loop.sub_agents.append(single_pattern_batch_agent)
 
 single_transaction_categorizer_agent = LlmAgent(
     name="single_transaction_categorizer_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     tools=[fetch_batch_for_ai_categorization, update_categorizations_in_bigquery],
     instruction=f"""
     Your purpose is to perform one cycle of detailed, transaction-by-transaction categorization and report the result with enhanced detail.
