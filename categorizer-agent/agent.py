@@ -60,11 +60,25 @@ single_merchant_batch_agent = LlmAgent(
     model="gemini-2.5-flash",
     tools=[get_merchant_batch_to_categorize, apply_bulk_merchant_update],
     instruction=f"""
-    Your purpose is to perform one cycle of BATCH merchant-based transaction categorization.
+    Your purpose is to perform one cycle of BATCH merchant-based transaction categorization. You are an expert at analyzing transaction data and assigning precise categories.
+
+    **Here are some examples of excellent categorization:**
+
+    * **Input Merchant**: 'starbucks'
+        * **Examples**: [{{"description_cleaned": "starbucks corp", "amount": -5.75}}, {{"description_cleaned": "starbucks 123 main st", "amount": -12.40}}]
+        * **Correct Output**: {{"merchant_name_cleaned": "starbucks", "transaction_type": "Debit", "category_l1": "Expense", "category_l2": "Food & Dining"}}
+
+    * **Input Merchant**: 'amzn mktp us'
+        * **Examples**: [{{"description_cleaned": "amzn mktp us item 123", "amount": -25.99}}, {{"description_cleaned": "amazon marketplace", "amount": -9.99}}]
+        * **Correct Output**: {{"merchant_name_cleaned": "amzn mktp us", "transaction_type": "Debit", "category_l1": "Expense", "category_l2": "Shopping"}}
+
+    * **Input Merchant**: 'adp payroll'
+        * **Examples**: [{{"description_cleaned": "direct deposit adp", "amount": 2500.00}}]
+        * **Correct Output**: {{"merchant_name_cleaned": "adp payroll", "transaction_type": "Credit", "category_l1": "Income", "category_l2": "Payroll"}}
 
     **Your process is a strict, two-step sequence:**
     1.  **FETCH BATCH**: Call `get_merchant_batch_to_categorize`. If the tool returns a "complete" status, you must stop and escalate.
-    2.  **ANALYZE & UPDATE BATCH**: Analyze the JSON data for ALL merchants in the batch. You **MUST ONLY** use `category_l1` and `category_l2` from this list: {VALID_CATEGORIES_JSON_STR}. Any category not in this list will be rejected by the tool and the transaction will not be categorized.
+    2.  **ANALYZE & UPDATE BATCH**: Analyze the JSON data for ALL merchants in the batch. You **MUST ONLY** use `category_l1` and `category_l2` from this list: {VALID_CATEGORIES_JSON_STR}.
             - **CRITICAL**: You **MUST ONLY** use `category_l1` and `category_l2` from this valid list: {VALID_CATEGORIES_JSON_STR}.
             - category_l1 can only be either "Income", "Expense" or "Transfer".
             - category_l2 can only be:
@@ -182,8 +196,8 @@ root_agent = Agent(
         AgentTool(agent=recurring_identification_loop),
         AgentTool(agent=merchant_categorization_loop),
         AgentTool(agent=pattern_categorization_loop),
-        AgentTool(agent=credit_categorization_loop), # MODIFIED
-        AgentTool(agent=debit_categorization_loop),  # MODIFIED
+        AgentTool(agent=credit_categorization_loop), 
+        AgentTool(agent=debit_categorization_loop), 
     ],
     instruction=f"""
     You are an elite financial transaction data analyst 🤖. Your purpose is to help users categorize their financial transactions using a powerful and efficient workflow.

@@ -600,7 +600,7 @@ def get_merchant_batch_to_categorize(tool_context: ToolContext, batch_size: int 
                     t.amount,
                     t.channel,
                     t.is_recurring
-                ) ORDER BY t.transaction_date DESC LIMIT 5
+                ) ORDER BY t.transaction_date DESC LIMIT 3
             ) AS example_transactions
         FROM `{TABLE_ID}` t
         JOIN TopMerchantGroups g
@@ -792,6 +792,7 @@ def fetch_batch_for_ai_categorization(tool_context: ToolContext, batch_size: int
         tool_context.actions.escalate = True
         return json.dumps({"status": "error", "message": f"Failed to fetch data: {e}"})
 
+
 def update_categorizations_in_bigquery(categorized_json_string: str) -> str:
     """
     Updates the main BigQuery table with categories provided by the AI, and returns a detailed summary.
@@ -818,7 +819,7 @@ def update_categorizations_in_bigquery(categorized_json_string: str) -> str:
         merge_sql = f"""
             MERGE `{TABLE_ID}` T
             USING `{TEMP_TABLE_ID}` U ON T.transaction_id = U.transaction_id
-            WHEN MATCHED THEN
+            WHEN MATCHED AND (T.category_l1 IS NULL OR T.category_l2 IS NULL) THEN
                 UPDATE SET
                     T.category_l1 = U.category_l1,
                     T.category_l2 = U.category_l2,
