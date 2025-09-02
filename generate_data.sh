@@ -54,8 +54,8 @@ CHANNELS = ["ATM", "Point-of-Sale", "Card-Not-Present", "Wire Transfer", "ACH", 
 EXPENSE_TAXONOMY = [
     {"category_l1": "Expense", "category_l2": "Groceries", "tier": "Premium", "merchant": "Whole Foods Market", "channel": "Point-of-Sale"},
     {"category_l1": "Expense", "category_l2": "Groceries", "tier": "Mid-Range", "merchant": "Trader Joe's", "channel": "Point-of-Sale"},
-    {"category_l1": "Expense", "category_l2": "Dining & Drinks", "tier": "Premium", "merchant": "Blue Bottle Coffee", "channel": "Point-of-Sale"},
-    {"category_l1": "Expense", "category_l2": "Dining & Drinks", "tier": "Mid-Range", "merchant": "Chipotle", "channel": "Point-of-Sale"},
+    {"category_l1": "Expense", "category_l2": "Food & Dining", "tier": "Premium", "merchant": "Blue Bottle Coffee", "channel": "Point-of-Sale"},
+    {"category_l1": "Expense", "category_l2": "Food & Dining", "tier": "Mid-Range", "merchant": "Chipotle", "channel": "Point-of-Sale"},
     {"category_l1": "Expense", "category_l2": "Shopping", "tier": "Mid-Range", "merchant": "Amazon.com", "channel": "Card-Not-Present"},
     {"category_l1": "Expense", "category_l2": "Shopping", "tier": "Premium", "merchant": "Lululemon", "channel": "Card-Not-Present"},
     {"category_l1": "Expense", "category_l2": "Entertainment", "tier": "Mid-Range", "merchant": "Netflix.com", "channel": "Card-Not-Present"},
@@ -83,7 +83,7 @@ LIFE_EVENT_IMPACT_MATRIX = {
     "Unexpected Major Car Repair": {
         "category": "Negative Financial Shock", "magnitude_range": (-2500, -1000), "duration": 2,
         "primary_signature": {"category_l2": "Auto & Transport", "merchant_options": ["Firestone Auto Care", "Pep Boys", "Local Mechanic LLC"]},
-        "secondary_effects_prompt": "Reflect a period of reduced discretionary spending (less Dining & Drinks, Shopping, Entertainment) for the next 2 months to recover from the car repair cost."
+        "secondary_effects_prompt": "Reflect a period of reduced discretionary spending (less Food & Dining, Shopping, Entertainment) for the next 2 months to recover from the car repair cost."
     },
     "Significant Medical Bill": {
         "category": "Negative Financial Shock", "magnitude_range": (-3000, -500), "duration": 3,
@@ -119,7 +119,7 @@ PERSONAS = [
 # --- II. HYBRID GENERATION & STATISTICAL MODELING ---
 
 AMOUNT_DISTRIBUTIONS = {
-    "Groceries": {"log_mean": 3.8, "log_std": 0.6}, "Dining & Drinks": {"log_mean": 2.8, "log_std": 0.8},
+    "Groceries": {"log_mean": 3.8, "log_std": 0.6}, "Food & Dining": {"log_mean": 2.8, "log_std": 0.8},
     "Shopping": {"log_mean": 4.2, "log_std": 1.0}, "Entertainment": {"log_mean": 3.2, "log_std": 0.7},
     "Health & Wellness": {"log_mean": 3.5, "log_std": 0.8}, "Medical": {"log_mean": 4.5, "log_std": 1.1},
     "Auto & Transport": {"log_mean": 3.4, "log_std": 0.9}, "Travel & Vacation": {"log_mean": 5.5, "log_std": 0.8},
@@ -178,9 +178,9 @@ def build_monthly_prompt(profile: Dict, month_date: datetime, transactions_this_
     **High-Quality Output Examples (for style guidance only):**
     ```json
     [
-        {{"description_raw": "SQ *BLUE BOTTLE COFFEE #B12", "merchant_name_raw": "SQ *BLUE BOTTLE COFFEE", "merchant_name_cleaned": "Blue Bottle Coffee", "category_l2": "Dining & Drinks"}},
+        {{"description_raw": "SQ *BLUE BOTTLE COFFEE #B12", "merchant_name_raw": "SQ *BLUE BOTTLE COFFEE", "merchant_name_cleaned": "Blue Bottle Coffee", "category_l2": "Food & Dining"}},
         {{"description_raw": "POS DEBIT TRADER JOE'S #552 PHOENIX AZ", "merchant_name_raw": "TRADER JOE'S #552", "merchant_name_cleaned": "Trader Joe's", "category_l2": "Groceries"}},
-        {{"description_raw": "TST* The Corner Bistro", "merchant_name_raw": "TST* The Corner Bistro", "merchant_name_cleaned": "The Corner Bistro", "category_l2": "Dining & Drinks"}},
+        {{"description_raw": "TST* The Corner Bistro", "merchant_name_raw": "TST* The Corner Bistro", "merchant_name_cleaned": "The Corner Bistro", "category_l2": "Food & Dining"}},
         {{"description_raw": "AMAZON.COM*A12B34CD5 AMZN.COM/BILL WA", "merchant_name_raw": "AMAZON.COM*A12B34CD5", "merchant_name_cleaned": "Amazon.com", "category_l2": "Shopping"}},
         {{"description_raw": "UBER TRIP 6J7K8L HELP.UBER.COM", "merchant_name_raw": "UBER TRIP", "merchant_name_cleaned": "Uber", "category_l2": "Auto & Transport"}},
         {{"description_raw": "{income_merchant_example} DEPOSIT PMT_1234", "merchant_name_raw": "{income_merchant_example} DEPOSIT", "merchant_name_cleaned": "{income_merchant_example}", "category_l2": "Income"}}
