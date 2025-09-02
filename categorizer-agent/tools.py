@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import pandas as pd
+from typing import Optional
 from google.api_core.exceptions import GoogleAPICallError
 from google.cloud import bigquery
 
@@ -752,7 +753,7 @@ def apply_bulk_pattern_update(categorized_json_string: str) -> str:
 
 
 # --- Phase 4: Transaction-Level AI & Learning Tools ---
-def fetch_batch_for_ai_categorization(tool_context: ToolContext, batch_size: int = 300, transaction_type: str | None = None) -> str:
+def fetch_batch_for_ai_categorization(tool_context: ToolContext, batch_size: int = 300, transaction_type: Optional[str] = None) -> str:
     """
     Fetches a batch of individual uncategorized transactions for detailed, row-by-row AI processing.
     Can be filtered by transaction type.
