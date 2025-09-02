@@ -264,8 +264,8 @@ financial_transaction_categorizer = Agent(
     **Custom Rule Creation:**
     - If the user asks to create a new rule (e.g., "set up a rule for medical expenses"), you must guide them through the process.
     - **Analyze the Request:** Determine the key information from the user's request.
-    - **Gather Information:** Ask clarifying questions to get all the required parameters for the `create_new_categorization_rule` tool: `identifier`, `rule_type` ('MERCHANT' or 'PATTERN'), `category_l1`, `category_l2`, `transaction_type` ('Debit', 'Credit', or 'All'), and `persona_type` (optional, for specific personas). Also ask if it should be a recurring rule.
-    - **Propose and Confirm:** Propose the complete rule to the user in a clear format. Example: "Great! I'm ready to create a rule. Does this look correct?\\n\\n- **Match On**: 'MEDICAL'\\n- **Rule Type**: PATTERN\\n- **Set Category To**: Expense / Medical\\n- **For Transaction Type**: All\\n- **For Persona Type**: Global (applies to all)\\n- **Mark as Recurring**: No"
+    - **Gather Information:** Ask clarifying questions to get all the required parameters for the `create_new_categorization_rule` tool: `identifier`, `rule_type` ('merchant' or 'pattern'), `category_l1`, `category_l2`, `transaction_type` ('Debit', 'Credit', or 'All'), and `persona_type` (optional, for specific personas). Also ask if it should be a recurring rule.
+    - **Propose and Confirm:** Propose the complete rule to the user in a clear format. Example: "Great! I'm ready to create a rule. Does this look correct?\\n\\n- **Match On**: 'MEDICAL'\\n- **Rule Type**: pattern\\n- **Set Category To**: Expense / Medical\\n- **For Transaction Type**: All\\n- **For Persona Type**: Global (applies to all)\\n- **Mark as Recurring**: No"
     - **Execute:** Once the user confirms, call the `create_new_categorization_rule` tool with the confirmed parameters.
 
     **Ad-hoc Queries:**
@@ -293,7 +293,7 @@ financial_transaction_categorizer = Agent(
           - **Key Columns**:
             - `rule_id` (STRING): Unique identifier for the rule.
             - `identifier` (STRING): The string to match (e.g., merchant or pattern).
-            - `rule_type` (STRING): 'MERCHANT' or 'PATTERN'.
+            - `rule_type` (STRING): 'merchant' or 'pattern'.
             - `persona_type` (STRING): The persona this rule applies to.
             - `category_l1` (STRING): L1 category.
             - `category_l2` (STRING): L2 category.

@@ -867,7 +867,7 @@ def learn_new_categorization_rules() -> str:
     logger.info("Harvesting new persona-aware rules from AI categorizations...")
     total_affected_rows = 0
 
-    # --- Part 1: Harvest MERCHANT rules ---
+    # --- Part 1: Harvest Merchant rules ---
     get_merchants_sql = f"""
     SELECT
         merchant_name_cleaned AS identifier,
@@ -920,10 +920,10 @@ def learn_new_categorization_rules() -> str:
             merchant_job.result()
             total_affected_rows += merchant_job.num_dml_affected_rows or 0
     except (GoogleAPICallError, Exception) as e:
-        logger.error(f"❌ Error harvesting MERCHANT rules: {e}")
+        logger.error(f"❌ Error harvesting merchant rules: {e}")
         return f"❌ **Error During Learning**: An error occurred while harvesting merchant rules. Error: {e}"
 
-    # --- Part 2: Harvest PATTERN rules ---
+    # --- Part 2: Harvest Pattern rules ---
     # (Similar logic as for merchants)
 
     if total_affected_rows > 0:
