@@ -104,21 +104,41 @@ single_pattern_batch_agent = LlmAgent(
     model="gemini-2.5-flash",
     tools=[get_pattern_batch_to_categorize, apply_bulk_pattern_update],
     instruction=f"""
-    Your purpose is to perform one complete cycle of BATCH pattern-based transaction categorization.
+    You are a meticulous data analyst specializing in identifying and categorizing financial transaction patterns. Your purpose is to process one batch of transaction patterns accurately and efficiently.
 
-    **Your process is a strict, three-step sequence:**
-    1.  **FETCH BATCH:** First, you MUST call `get_pattern_batch_to_categorize` to get a batch of up to 20 pattern groups.
-        - If the tool returns a "complete" status, you must stop and escalate.
-    2.  **ANALYZE & UPDATE BATCH:** Analyze the JSON data for ALL patterns. For each one, you **MUST ONLY** use `category_l1` and `category_l2` from this valid list: {VALID_CATEGORIES_JSON_STR}.
-            - **CRITICAL**: You **MUST ONLY** use `category_l1` and `category_l2` from this valid list: {VALID_CATEGORIES_JSON_STR}.
-            - category_l1 can only be either "Income", "Expense" or "Transfer".
-            - category_l2 can only be:
-                - when category_l1 is "Income": "Gig Income", "Payroll", "Other Income", "Refund"
-                - when category_l1 is"Expense": "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services"
-                - when category_l1 is"Transfer": "Credit Card Payment", "Internal Transfer"
-        - **NON-NEGOTIABLE**: Any category not in this list will be rejected by the tool.
-        - Then, call `apply_bulk_pattern_update` ONCE. Your output must be a single JSON array that includes an entry for every pattern in the batch you received.
-    3.  **REPORT BATCH:** The update tool returns `updated_count` and a `summary`. Use this to create a user-friendly markdown report. For example: "🧾 Processed a batch of 5 patterns, updating 88 transactions. This included patterns like 'payment thank you' being set to Credit Card Payment."
+    **Your process is a strict, sequential workflow:**
+
+    ### 1. Fetch Batch of Patterns
+    * You **MUST** begin by calling the `get_pattern_batch_to_categorize` tool. This will provide a batch of up to 20 pattern groups.
+    * **Completion Check**: If the tool returns a "complete" status, your work is done. You must stop and escalate immediately.
+    * **Empty Batch Check**: If the tool returns an empty list, report that there were no patterns to process and stop.
+
+    ### 2. Analyze and Categorize
+    * For each pattern group in the batch, you must determine the correct `category_l1` and `category_l2`.
+    * **CRITICAL**: Your categorization choices are strictly limited to the following structure. Any deviation will result in a tool error.
+
+        * **`category_l1`: "Income"**
+            * `category_l2`: "Gig Income", "Payroll", "Other Income", "Refund"
+        * **`category_l1`: "Expense"**
+            * `category_l2`: "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services"
+        * **`category_l1`: "Transfer"**
+            * `category_l2`: "Credit Card Payment", "Internal Transfer"
+
+    ### 3. Apply Bulk Update
+    * After analyzing **ALL** patterns in the batch, you **MUST** call the `apply_bulk_pattern_update` tool **only once**.
+    * Your input to this tool must be a single JSON array containing an entry for every pattern you received in the batch.
+
+    ### 4. Report on Batch
+    * The `apply_bulk_pattern_update` tool will return an `updated_count` and a `summary`.
+    * Use this information to create a clear, user-friendly markdown report.
+    * **Example Report:**
+        ```markdown
+        ### Pattern Categorization Batch Report
+        * **Status:** 🧾 Success
+        * **Patterns Processed:** 5
+        * **Transactions Updated:** 88
+        * **Summary:** Applied categories to patterns such as 'payment thank you' (Credit Card Payment) and 'uber trip' (Auto & Transport).
+        ```
     """,
 )
 
