@@ -193,12 +193,12 @@ def build_monthly_prompt(profile: Dict, month_date: datetime, transactions_this_
     - Persona: '{persona["persona_name"]}' ({persona["description"]})
     - **Monthly Narrative:** {narrative_block}
     **CRITICAL INSTRUCTIONS:**
-    1. For each transaction, provide a `description_raw`, `merchant_name_raw`, `merchant_name_cleaned`, and `category_l2`.
-    2. **The `merchant_name_raw` MUST be consistent with the `description_raw`.**
-    3. **The `merchant_name_cleaned` MUST be the canonical, recognizable name of the business.**
-    4. For income, use `category_l2`: "Income", "Refund", or "Other Income".
-    5. Do NOT generate predictable monthly bills; they are handled separately.
-    6. The entire output MUST be ONLY the raw JSON array, conforming strictly to the provided schema.
+    1.  For each transaction, provide a `description_raw`, `merchant_name_raw`, `merchant_name_cleaned`, and `category_l2`.
+    2.  **The `merchant_name_raw` MUST be consistent with the `description_raw`.**
+    3.  **The `merchant_name_cleaned` MUST be the canonical, recognizable name of the business.**
+    4.  For income, use `category_l2`: "Income", "Refund", or "Other Income".
+    5.  Do NOT generate predictable monthly bills; they are handled separately.
+    6.  The entire output MUST be ONLY the raw JSON array, conforming strictly to the provided schema. Ensure all strings are properly escaped.
     {few_shot_examples}
     **Your Task:** Generate the JSON array for **{month_name}**.
     """
@@ -209,7 +209,7 @@ try:
     if not PROJECT_ID or "your-gcp-project-id" in PROJECT_ID:
         raise ValueError("PROJECT_ID is not set correctly.")
     vertexai.init(project=PROJECT_ID, location=LOCATION)
-    model = GenerativeModel("gemini-2.5-flash-lite")
+    model = GenerativeModel("gemini-2.5-flash")
     bq_client = bigquery.Client(project=PROJECT_ID)
     logging.info(f"Initialized Vertex AI and BigQuery for project '{PROJECT_ID}'")
 except Exception as e:
@@ -244,7 +244,19 @@ async def generate_data_with_gemini(prompt: str) -> List[Dict[str, Any]]:
     try:
         generation_config = GenerationConfig(response_mime_type="application/json", response_schema=TRANSACTION_SCHEMA_FOR_LLM, temperature=1.0, max_output_tokens=8192)
         response = await model.generate_content_async(prompt, generation_config=generation_config)
-        return json.loads(response.text)
+        
+        # Clean the response before parsing
+        text_response = response.text.strip()
+        if text_response.startswith("```json"):
+            text_response = text_response[7:]
+        if text_response.endswith("```"):
+            text_response = text_response[:-3]
+
+        return json.loads(text_response)
+    except json.JSONDecodeError as e:
+        logging.error(f"Failed to decode JSON from Vertex AI API: {e}")
+        logging.error(f"Raw response: {response.text}")
+        return []
     except Exception as e:
         logging.error(f"An unexpected error occurred with the Vertex AI API: {e}")
         return []
