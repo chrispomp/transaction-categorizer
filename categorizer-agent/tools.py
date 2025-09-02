@@ -36,7 +36,11 @@ def get_data_quality_report() -> str:
     """
     logger.info("Starting data quality audit...")
     queries = {
-        "Uncategorized Transactions": {
+        "Categorization Status": {
+            "query": f"SELECT COALESCE(category_l1, 'Uncategorized') as category, COUNT(transaction_id) as transaction_count FROM `{TABLE_ID}` GROUP BY 1 ORDER BY transaction_count DESC;",
+            "summary": "Overview of categorized vs. uncategorized transactions."
+        },
+        "Uncategorized Transactions Breakdown": {
             "query": f"SELECT CASE WHEN category_l1 IS NULL AND category_l2 IS NULL THEN 'Missing L1 & L2' WHEN category_l1 IS NULL THEN 'Missing L1 Only' WHEN category_l2 IS NULL THEN 'Missing L2 Only' END AS issue_type, transaction_type, channel, COUNT(transaction_id) AS transaction_count FROM `{TABLE_ID}` WHERE category_l1 IS NULL OR category_l2 IS NULL GROUP BY 1, 2, 3 ORDER BY transaction_count DESC;",
             "summary": "Breakdown of transactions missing one or both category labels."
         },
@@ -60,22 +64,22 @@ def get_data_quality_report() -> str:
             "summary": "Lists recurring transactions from the same merchant that have been assigned multiple, conflicting L2 categories."
         }
     }
-    results_markdown = "📊 **Data Quality Audit Report**\\n\\nHere's a summary of the data quality checks. Any tables below indicate areas that may need attention.\\n"
+    results_markdown = "📊 **Data Quality Audit Report**\n\nHere's a summary of the data quality checks. Any tables below indicate areas that may need attention.\n"
     for title, data in queries.items():
-        results_markdown += f"---\\n\\n### {title}\\n*_{data['summary']}_*\\n\\n"
+        results_markdown += f"---\n\n### {title}\n*_{data['summary']}_*\n\n"
         try:
             df = bq_client.query(data["query"]).to_dataframe()
             if not df.empty:
-                results_markdown += df.to_markdown(index=False) + "\\n\\n"
+                results_markdown += df.to_markdown(index=False) + "\n\n"
             else:
-                results_markdown += "✅ **No issues found in this category.**\\n\\n"
+                results_markdown += "✅ **No issues found in this category.**\n\n"
         except GoogleAPICallError as e:
             logger.error(f"BigQuery error during '{title}' audit: {e}")
-            results_markdown += f"❌ **Error executing query for `{title}`.** Please check the logs for details.\\n\\n"
+            results_markdown += f"❌ **Error executing query for `{title}`.** Please check the logs for details.\n\n"
         except Exception as e:
             logger.error(f"Unexpected error during '{title}' audit: {e}")
-            results_markdown += f"❌ **An unexpected error occurred while checking `{title}`.** Please check the logs.\\n\\n"
-    results_markdown += "---\\n\\nAudit complete. Based on these results, you may want to proceed with cleansing and categorization."
+            results_markdown += f"❌ **An unexpected error occurred while checking `{title}`.** Please check the logs.\n\n"
+    results_markdown += "---\n\nAudit complete. Based on these results, you may want to proceed with cleansing and categorization."
     logger.info("Data quality audit finished.")
     return results_markdown
 
@@ -121,7 +125,7 @@ def run_custom_query(query: str) -> str:
             if df.empty:
                 return "✅ **Query Successful**: The query ran successfully but returned no results."
             else:
-                response = f"✅ **Query Successful**:\\n\\n{df.to_markdown(index=False)}"
+                response = f"✅ **Query Successful**:\n\n{df.to_markdown(index=False)}"
                 return response
         else: 
             affected_rows = results.num_dml_affected_rows or 0
@@ -129,21 +133,21 @@ def run_custom_query(query: str) -> str:
 
     except GoogleAPICallError as e:
         logger.error(f"❌ BigQuery error during custom query execution: {e}")
-        return f"❌ **Error During Query Execution**\\nA BigQuery error occurred. Please check the syntax of your query and the application logs. Error: {e}"
+        return f"❌ **Error During Query Execution**\nA BigQuery error occurred. Please check the syntax of your query and the application logs. Error: {e}"
     except Exception as e:
         logger.error(f"❌ Unexpected error during custom query execution: {e}")
-        return f"❌ **Unexpected Error**\\nAn unexpected error occurred. Please check the logs. Error: {e}"
+        return f"❌ **Unexpected Error**\nAn unexpected error occurred. Please check the logs. Error: {e}"
 
 
 # --- Phase 1: Dynamic Rules-Based Tools ---
 
-def cleanse_transaction_data() -> str:
+def prepare_transaction_data() -> str:
     """
-    Cleanses the raw merchant and description fields for all transactions that haven't been cleaned yet.
+    prepares the raw merchant and description fields for all transactions that haven't been cleaned yet.
     This involves converting to lowercase and removing special characters.
     """
     logger.info("Starting data cleansing for all transactions...")
-    # This query will cleanse the raw fields for any transaction where the
+    # This query will prepare the raw fields for any transaction where the
     # cleaned fields are currently NULL, ensuring it only runs once per row.
     cleansing_sql = f"""
     MERGE `{TABLE_ID}` T
@@ -172,9 +176,9 @@ def cleanse_transaction_data() -> str:
         affected_rows = job.num_dml_affected_rows or 0
         logger.info("✅ Data cleansing complete. %d rows affected.", affected_rows)
         if affected_rows > 0:
-            return f"⚙️ **Data Cleansing Complete**\n\nSuccessfully cleansed merchant and description data for **{affected_rows}** new transactions."
+            return f"⚙️ **Data Cleansing Complete**\n\nSuccessfully prepared merchant and description data for **{affected_rows}** new transactions."
         else:
-            return "✅ **Data Cleansing Complete**\n\nAll transactions were already cleansed."
+            return "✅ **Data Cleansing Complete**\n\nAll transactions were already prepared."
     except GoogleAPICallError as e:
         logger.error(f"❌ BigQuery error during data cleansing: {e}")
         return f"❌ **Error During Data Cleansing**\nA BigQuery error occurred. Please check the logs. Error: {e}"
@@ -332,7 +336,7 @@ def review_and_resolve_rule_conflicts() -> str:
 
     # Step 3: Use a temporary, in-tool LLM agent to resolve conflicts.
     conflict_resolver_agent = LlmAgent(
-        model="gemini-2.5-flash-lite",
+        model="gemini-1.5-flash",
         instruction="""
         You are a data analyst specializing in financial transaction categorization.
         You will be given a JSON object representing a set of conflicting rules for a single identifier.
@@ -443,13 +447,13 @@ def harmonize_recurring_transaction_categories() -> str:
         affected_rows = query_job.num_dml_affected_rows or 0
         logger.info("✅ Recurring transaction harmonization complete. %d rows affected.", affected_rows)
         if affected_rows > 0:
-            return f"🔄 **Harmonization Complete**\\n\\nI've successfully standardized the categories for **{affected_rows}** recurring transactions, ensuring consistency."
+            return f"🔄 **Harmonization Complete**\n\nI've successfully standardized the categories for **{affected_rows}** recurring transactions, ensuring consistency."
         else:
-            return "✅ **Harmonization Complete**\\n\\nNo recurring transactions needed harmonization at this time."
+            return "✅ **Harmonization Complete**\n\nNo recurring transactions needed harmonization at this time."
 
     except GoogleAPICallError as e:
         logger.error(f"❌ BigQuery error during harmonization phase: {e}")
-        return f"❌ **Error During Harmonization**\\nA BigQuery error occurred. Please check the logs. Error: {e}"
+        return f"❌ **Error During Harmonization**\nA BigQuery error occurred. Please check the logs. Error: {e}"
 
 
 # --- Phase 2 & 3: AI-Based Bulk & Recurring Tools ---

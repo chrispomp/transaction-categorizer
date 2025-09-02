@@ -38,13 +38,13 @@ logger = logging.getLogger(__name__)
 # --- Loop Agents for Batch Processing ---
 recurring_transaction_identifier_agent = LlmAgent(
     name="recurring_transaction_identifier_agent",
-    model="gemini-2.5-flash-lite",
+    model="gemini-1.5-flash",
     tools=[get_recurring_transaction_candidates, flag_recurring_transactions_in_bulk],
     instruction="""
     Your purpose is to perform one cycle of BATCH recurring transaction identification.
-    1. **FETCH**: Call `get_recurring_transaction_candidates` to get potential recurring merchants. Escalate if complete.
-    2. **ANALYZE & UPDATE**: Analyze the JSON for ALL merchants. Decide if a merchant is recurring based on `transaction_intervals_days` (strong signal for patterns like `[30, 31, 29]`), `has_recurring_keywords`, and low `stddev_amount`. Then, call `flag_recurring_transactions_in_bulk` ONCE with a JSON list of objects for merchants you are confident are recurring. Each object must have `merchant_name_cleaned`, `transaction_type`, and `is_recurring: true`.
-    3. **REPORT**: The update tool returns `updated_count` and a `summary`. Create a markdown report, e.g., "🔍 Identified 'spotify' and 'netflix' as recurring, flagging 24 new transactions."
+    1.  **FETCH**: Call `get_recurring_transaction_candidates` to get potential recurring merchants. Escalate if complete.
+    2.  **ANALYZE & UPDATE**: Analyze the JSON for ALL merchants. Decide if a merchant is recurring based on `transaction_intervals_days` (strong signal for patterns like `[30, 31, 29]`), `has_recurring_keywords`, and low `stddev_amount`. Then, call `flag_recurring_transactions_in_bulk` ONCE with a JSON list of objects for merchants you are confident are recurring. Each object must have `merchant_name_cleaned`, `transaction_type`, and `is_recurring: true`.
+    3.  **REPORT**: The update tool returns `updated_count` and a `summary`. Create a visually appealing markdown report. Example: "**🔍 Recurring Transactions Identified**\n\nI found and flagged **24** new recurring transactions for merchants like 'spotify' and 'netflix'. This helps in better tracking of subscriptions and regular bills."
     """,
 )
 
@@ -57,7 +57,7 @@ recurring_transaction_identification_workflow = LoopAgent(
 
 merchant_categorization_agent = LlmAgent(
     name="merchant_categorization_agent",
-    model="gemini-2.5-flash-lite",
+    model="gemini-1.5-flash",
     tools=[get_uncategorized_merchants_batch, apply_bulk_merchant_update],
     instruction=f"""
     Your purpose is to perform one cycle of BATCH merchant-based transaction categorization. You are an expert at analyzing transaction data and assigning precise categories.
@@ -87,7 +87,7 @@ merchant_categorization_agent = LlmAgent(
                 - when category_l1 is"Transfer": "Credit Card Payment", "Internal Transfer"
         - **NON-NEGOTIABLE**: This is a critical constraint. Do not invent, create, or use any category not explicitly provided.
         - Then, call `apply_bulk_merchant_update` ONCE with a single JSON array. Each merchant object MUST include `merchant_name_cleaned`, `transaction_type`, `category_l1`, and `category_l2`.
-    3.  **REPORT BATCH**: The tool returns `updated_count` and a `summary`. Create a user-friendly markdown report, e.g., "🛒 Processed a batch of 3 merchants, updating 112 transactions. Key updates include 'grubhub' to Food & Dining."
+    3.  **REPORT BATCH**: The tool returns `updated_count` and a `summary`. Create an insightful, data-driven markdown report. Example: "**🛒 Merchant Batch Categorized**\n\nI processed a batch of **3** merchants, updating **112** transactions. Key updates include:\n- 'grubhub' -> Food & Dining\n- 'shell' -> Auto & Transport"
     """,
 )
 
@@ -100,7 +100,7 @@ merchant_categorization_workflow = LoopAgent(
 
 pattern_categorization_agent = LlmAgent(
     name="pattern_categorization_agent",
-    model="gemini-2.5-flash-lite",
+    model="gemini-1.5-flash",
     tools=[get_uncategorized_patterns_batch, apply_bulk_pattern_update],
     instruction=f"""
     You are a meticulous data analyst specializing in identifying and categorizing financial transaction patterns. Your purpose is to process one batch of transaction patterns accurately and efficiently.
@@ -129,14 +129,14 @@ pattern_categorization_agent = LlmAgent(
 
     ### 4. Report on Batch
     * The `apply_bulk_pattern_update` tool will return an `updated_count` and a `summary`.
-    * Use this information to create a clear, user-friendly markdown report.
+    * Use this information to create a clear, user-friendly, and insightful markdown report.
     * **Example Report:**
         ```markdown
         ### Pattern Categorization Batch Report
         * **Status:** 🧾 Success
         * **Patterns Processed:** 5
         * **Transactions Updated:** 88
-        * **Summary:** Applied categories to patterns such as 'payment thank you' (Credit Card Payment) and 'uber trip' (Auto & Transport).
+        * **Key Insights:** Applied categories to common patterns like 'payment thank you' (Credit Card Payment) and 'uber trip' (Auto & Transport), improving categorization accuracy for many transactions at once.
         ```
     """,
 )
@@ -153,19 +153,19 @@ pattern_categorization_workflow = LoopAgent(
 # transactions based on the initial prompt it receives from its parent controller.
 individual_transaction_categorizer_agent = LlmAgent(
     name="individual_transaction_categorizer_agent",
-    model="gemini-2.5-flash-lite",
+    model="gemini-1.5-flash",
     tools=[get_transaction_batch_for_ai_categorization, update_transactions_with_ai_categories],
     instruction=f"""
     You are an expert financial analyst. Your goal is to categorize a batch of transactions.
     
     **Your process is determined by the initial prompt you receive:**
     1.  **Determine Transaction Type:** The initial prompt will tell you to process either 'Credit' or 'Debit' transactions. You must use this to inform your next step.
-    2.  **Fetch Batch:** Call the `get_transaction_batch_for_ai_categorization` tool, passing the correct `transaction_type` ('Credit' or 'Debit') that you determined in the previous step.
+    2.  **Fetch Batch:** Call the `get_transaction_batch_for_ai_ categorization` tool, passing the correct `transaction_type` ('Credit' or 'Debit') that you determined in the previous step.
     3.  **Analyze & Categorize:**
         * If the tool returns "complete", escalate immediately.
         * For each transaction, assign `category_l1` and `category_l2` based **strictly** on this list: {VALID_CATEGORIES_JSON_STR}.
     4.  **Update Batch:** Call `update_transactions_with_ai_categories` **once** with all your categorizations for the batch.
-    5.  **Report Summary:** Use the `summary` from the update tool to create a clear markdown report.
+    5.  **Report Summary:** Use the `summary` from the update tool to create a data-driven and visually appealing markdown report. Include the number of transactions categorized and a breakdown of the top categories. Example: '**Transaction Batch Processed**\n\nSuccessfully categorized **150** debit transactions. Top categories assigned:\n- Shopping: 45 transactions\n- Food & Dining: 32 transactions\n- Bills & Utilities: 25 transactions'
     """,
 )
 
@@ -182,7 +182,7 @@ individual_transaction_categorization_workflow = LoopAgent(
 # --- Controller Agent to Manage Credit/Debit Runs ---
 txn_categorization_controller = LlmAgent(
     name="txn_categorization_controller",
-    model="gemini-2.5-flash-lite",
+    model="gemini-1.5-flash",
     tools=[AgentTool(agent=individual_transaction_categorization_workflow)],
     instruction="""
     You are a workflow orchestrator. Your sole responsibility is to categorize all remaining credit and debit transactions by running the `individual_transaction_categorization_workflow` agent in two distinct phases.
@@ -199,7 +199,7 @@ txn_categorization_controller = LlmAgent(
 # --- Root Orchestrator Agent ---
 financial_transaction_categorizer = Agent(
     name="financial_transaction_categorizer",
-    model="gemini-2.5-flash",
+    model="gemini-1.5-flash",
     tools=[
         get_data_quality_report,
         reset_all_transaction_categorizations,
