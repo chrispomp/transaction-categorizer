@@ -53,9 +53,9 @@ VALID_CATEGORIES = {
         "Groceries", "Food & Dining", "Shopping", "Entertainment",
         "Health & Wellness", "Auto & Transport", "Travel & Vacation",
         "Software & Tech", "Medical", "Insurance", "Bills & Utilities",
-        "Fees & Charges", "Business Services"
+        "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
     ],
-    "Transfer": ["Credit Card Payment", "Internal Transfer"]
+    "Transfer": ["Credit Card Payment", "Internal Transfer", "ATM Withdrawal"]
 }
 VALID_CATEGORIES_JSON_STR = json.dumps(VALID_CATEGORIES)
 

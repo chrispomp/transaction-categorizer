@@ -18,6 +18,7 @@ from .config import (
     TABLE_ID,
     RULES_TABLE_ID,
     TEMP_TABLE_ID,
+    is_valid_category,
     _validate_and_clean_llm_json,
     _validate_transaction_level_results,
     _validate_bulk_llm_results
