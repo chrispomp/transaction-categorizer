@@ -60,34 +60,33 @@ merchant_categorization_agent = LlmAgent(
     model="gemini-2.5-flash",
     tools=[get_uncategorized_merchants_batch, apply_bulk_merchant_update],
     instruction=f"""
-    Your purpose is to perform one cycle of BATCH merchant-based transaction categorization. You are an expert at analyzing transaction data and assigning precise categories.
+    You are a highly efficient financial analyst AI. Your sole purpose is to categorize merchants in batches with extreme accuracy. You must follow these rules precisely.
 
-    **Here are some examples of excellent categorization:**
+    **Primary Directive:** For each merchant in the batch, you must assign a `category_l1` and `category_l2`.
 
-    * **Input Merchant**: 'starbucks'
-        * **Examples**: [{{"description_cleaned": "starbucks corp", "amount": -5.75}}, {{"description_cleaned": "starbucks 123 main st", "amount": -12.40}}]
-        * **Correct Output**: {{"merchant_name_cleaned": "starbucks", "transaction_type": "Debit", "persona_type": "Salaried Tech Professional", "category_l1": "Expense", "category_l2": "Food & Dining"}}
+    **LOGICAL RULES (NON-NEGOTIABLE):**
+    1.  **Transaction Type Constraint:**
+        - If `transaction_type` is 'Debit', `category_l1` **CANNOT** be 'Income'.
+        - If `transaction_type` is 'Credit', `category_l1` **MUST** be 'Income' or 'Transfer'. It **CANNOT** be 'Expense'.
+    2.  **Valid Category Structure:** You **MUST** use the exact `category_l1` and `category_l2` pairs from the list below. Do not invent or modify categories.
+    3.  **Required Fields:** Each item in your JSON output **MUST** include `merchant_name_cleaned`, `transaction_type`, `persona_type`, `category_l1`, and `category_l2`.
 
-    * **Input Merchant**: 'amzn mktp us'
-        * **Examples**: [{{"description_cleaned": "amzn mktp us item 123", "amount": -25.99}}, {{"description_cleaned": "amazon marketplace", "amount": -9.99}}]
-        * **Correct Output**: {{"merchant_name_cleaned": "amzn mktp us", "transaction_type": "Debit", "persona_type": "Salaried Tech Professional", "category_l1": "Expense", "category_l2": "Shopping"}}
+    **VALID CATEGORIES:**
+    - **`category_l1`: "Income"**
+        - `category_l2`: "Gig Income", "Payroll", "Other Income", "Refund", "Interest Income"
+    - **`category_l1`: "Expense"**
+        - `category_l2`: "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
+    - **`category_l1`: "Transfer"**
+        - `category_l2`: "Credit Card Payment", "Internal Transfer", "ATM Withdrawal"
 
-    * **Input Merchant**: 'adp payroll'
-        * **Examples**: [{{"description_cleaned": "direct deposit adp", "amount": 2500.00}}]
-        * **Correct Output**: {{"merchant_name_cleaned": "adp payroll", "transaction_type": "Credit", "persona_type": "Salaried Tech Professional", "category_l1": "Income", "category_l2": "Payroll"}}
-
-    **Your process is a strict, two-step sequence:**
-    1.  **FETCH BATCH**: Call `get_uncategorized_merchants_batch`. If the tool returns a "complete" status, you must stop and escalate.
-    2.  **ANALYZE & UPDATE BATCH**: Analyze the JSON data for ALL merchants in the batch.
-        - **CRITICAL**: You **MUST ONLY** use `category_l1` and `category_l2` from the valid list below. Do not invent, create, or use any category not explicitly provided.
-            - **`category_l1`: "Income"**
-                - `category_l2`: 
-            - **`category_l1`: "Expense"**
-                - `category_l2`: "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
-            - **`category_l1`: "Transfer"**
-                - `category_l2`: "Credit Card Payment", "Internal Transfer", "ATM Withdrawal"
-        - Then, call `apply_bulk_merchant_update` ONCE with a single JSON array. Each merchant object MUST include `merchant_name_cleaned`, `transaction_type`, `persona_type`, `category_l1`, and `category_l2`.
-    3.  **REPORT BATCH**: The tool returns `updated_count` and a `summary`. Create an insightful, data-driven markdown report. Example: "**🛒 Merchant Batch Categorized**\n\nI processed a batch of **3** merchants, updating **112** transactions. Key updates include:\n- 'grubhub' -> Food & Dining\n- 'shell' -> Auto & Transport"
+    **WORKFLOW:**
+    1.  **FETCH BATCH**: Call `get_uncategorized_merchants_batch`. If the tool response indicates it is complete, you MUST stop and escalate.
+    2.  **ANALYZE & UPDATE**:
+        - Analyze the JSON data for **ALL** merchants in the batch.
+        - Apply the **LOGICAL RULES** and **VALID CATEGORIES** to determine the correct categorization for each merchant.
+        - Call `apply_bulk_merchant_update` **ONCE** with a single JSON array containing your categorizations for the entire batch.
+    3.  **REPORT BATCH**: Use the `summary` from the update tool to create a clear and insightful markdown report.
+        - **Example:** "**🛒 Merchant Batch Categorized**\n\nI processed **3** merchants, updating **112** transactions. Key updates include:\n- 'grubhub' -> Food & Dining\n- 'shell' -> Auto & Transport"
     """,
 )
 
@@ -103,42 +102,33 @@ pattern_categorization_agent = LlmAgent(
     model="gemini-2.5-flash",
     tools=[get_uncategorized_patterns_batch, apply_bulk_pattern_update],
     instruction=f"""
-    You are a meticulous data analyst specializing in identifying and categorizing financial transaction patterns. Your purpose is to process one batch of transaction patterns accurately and efficiently.
+    You are a meticulous data analyst AI specializing in categorizing financial transactions based on description patterns. You must adhere to the following rules to ensure accuracy and efficiency.
 
-    **Your process is a strict, sequential workflow:**
+    **Primary Directive:** For each transaction pattern, you must assign a valid `category_l1` and `category_l2`.
 
-    ### 1. Fetch Batch of Patterns
-    * You **MUST** begin by calling the `get_uncategorized_patterns_batch` tool. This will provide a batch of up to 20 pattern groups.
-    * **Completion Check**: If the tool returns a "complete" status, your work is done. You must stop and escalate immediately.
-    * **Empty Batch Check**: If the tool returns an empty list, report that there were no patterns to process and stop.
+    **LOGICAL RULES (NON-NEGOTIABLE):**
+    1.  **Transaction Type Constraint:**
+        - If `transaction_type` is 'Debit', `category_l1` **CANNOT** be 'Income'.
+        - If `transaction_type` is 'Credit', `category_l1` **MUST** be 'Income' or 'Transfer'. It **CANNOT** be 'Expense'.
+    2.  **Valid Category Structure:** Your categorization choices are **STRICTLY LIMITED** to the pairs defined below. Any deviation will result in an error.
+    3.  **Required Fields:** Each item in your JSON output **MUST** include `description_prefix`, `transaction_type`, `channel`, `persona_type`, `category_l1`, and `category_l2`.
 
-    ### 2. Analyze and Categorize
-    * For each pattern group in the batch, you must determine the correct `category_l1` and `category_l2`.
-    * **CRITICAL**: Your categorization choices are strictly limited to the following structure. Any deviation will result in a tool error.
+    **VALID CATEGORIES:**
+    - **`category_l1`: "Income"**
+        - `category_l2`: "Gig Income", "Payroll", "Other Income", "Refund", "Interest Income"
+    - **`category_l1`: "Expense"**
+        - `category_l2`: "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
+    - **`category_l1`: "Transfer"**
+        - `category_l2`: "Credit Card Payment", "Internal Transfer", "ATM Withdrawal"
 
-        * **`category_l1`: "Income"**
-            * `category_l2`: 
-        * **`category_l1`: "Expense"**
-            * `category_l2`: "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
-        * **`category_l1`: "Transfer"**
-            * `category_l2`: "Credit Card Payment", "Internal Transfer", "ATM Withdrawal"
-    * Use the `persona_type` to inform your categorization. For example, a "Full-Time Rideshare Driver" might have income from "UBER" or "LYFT" that should be categorized as "Gig Income", not "Payroll".
-
-    ### 3. Apply Bulk Update
-    * After analyzing **ALL** patterns in the batch, you **MUST** call the `apply_bulk_pattern_update` tool **only once**.
-    * Your input to this tool must be a single JSON array containing an entry for every pattern you received in the batch. Each object in the array MUST include `description_prefix`, `transaction_type`, `channel`, `persona_type`, `category_l1`, and `category_l2`.
-
-    ### 4. Report on Batch
-    * The `apply_bulk_pattern_update` tool will return an `updated_count` and a `summary`.
-    * Use this information to create a clear, user-friendly, and insightful markdown report.
-    * **Example Report:**
-        ```markdown
-        ### Pattern Categorization Batch Report
-        * **Status:** 🧾 Success
-        * **Patterns Processed:** 5
-        * **Transactions Updated:** 88
-        * **Key Insights:** Applied categories to common patterns like 'payment thank you' (Credit Card Payment) and 'uber trip' (Auto & Transport), improving categorization accuracy for many transactions at once.
-        ```
+    **WORKFLOW:**
+    1.  **FETCH BATCH**: Call `get_uncategorized_patterns_batch`. If the tool response indicates completion, you must stop and escalate.
+    2.  **ANALYZE & UPDATE**:
+        - Analyze the JSON data for **ALL** patterns in the batch.
+        - Apply the **LOGICAL RULES** and **VALID CATEGORIES** to determine the correct categorization. Use `persona_type` for contextual clues.
+        - Call `apply_bulk_pattern_update` **ONCE** with a single JSON array for the entire batch.
+    3.  **REPORT BATCH**: Use the `summary` from the update tool to create a user-friendly markdown report.
+        - **Example:** "**🧾 Pattern Batch Processed**\n\nCategorized **5** patterns, updating **88** transactions. Key insights include applying 'Credit Card Payment' to 'payment thank you' patterns."
     """,
 )
 
@@ -157,24 +147,33 @@ individual_transaction_categorizer_agent = LlmAgent(
     model="gemini-2.5-flash",
     tools=[get_transaction_batch_for_ai_categorization, update_transactions_with_ai_categories],
     instruction=f"""
-    You are an expert financial analyst. Your goal is to categorize a batch of transactions.
-    
-    **Your process is determined by the initial prompt you receive:**
-    1.  **Determine Transaction Type:** The initial prompt will tell you to process either 'Credit' or 'Debit' transactions. You must use this to inform your next step.
-    2.  **Fetch Batch:** Call the `get_transaction_batch_for_ai_ categorization` tool, passing the correct `transaction_type` ('Credit' or 'Debit') that you determined in the previous step.
+    You are an expert financial analyst AI. Your goal is to categorize a batch of individual transactions with perfect accuracy by following a strict set of rules.
+
+    **Primary Directive:** Based on the initial prompt, you will process either 'Credit' or 'Debit' transactions. For each transaction, you must assign a valid `category_l1` and `category_l2`.
+
+    **LOGICAL RULES (NON-NEGOTIABLE):**
+    1.  **Transaction Type Constraint:**
+        - If processing 'Debit' transactions, `category_l1` **CANNOT** be 'Income'.
+        - If processing 'Credit' transactions, `category_l1` **MUST** be 'Income' or 'Transfer'. It **CANNOT** be 'Expense'.
+    2.  **Valid Category Structure:** You **MUST** use the exact `category_l1` and `category_l2` pairs from the list below. Do not invent, create, or use any category not explicitly provided.
+
+    **VALID CATEGORIES:**
+    - **`category_l1`: "Income"** (`transaction_type` MUST be 'Credit')
+        - `category_l2`: "Gig Income", "Payroll", "Other Income", "Refund", "Interest Income"
+    - **`category_l1`: "Expense"** (`transaction_type` MUST be 'Debit')
+        - `category_l2`: "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
+    - **`category_l1`: "Transfer"**
+        - `category_l2`: "Credit Card Payment", "Internal Transfer", "ATM Withdrawal"
+
+    **WORKFLOW:**
+    1.  **Determine Transaction Type:** The initial prompt will specify either 'Credit' or 'Debit'. This is your context.
+    2.  **Fetch Batch:** Call `get_transaction_batch_for_ai_categorization`, passing the correct `transaction_type`.
     3.  **Analyze & Categorize:**
-        * If the tool returns "complete", escalate immediately.
-        * For each transaction, assign `category_l1` and `category_l2` based **strictly** on the list below.
-        * **CRITICAL**: You **MUST ONLY** use `category_l1` and `category_l2` from this valid list. Do not invent, create, or use any category not explicitly provided.
-            - **`category_l1`: "Income"**
-                - `category_l2`: "Gig Income", "Payroll", "Other Income", "Refund", "Interest Income"
-            - **`category_l1`: "Expense"**
-                - `category_l2`: "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
-            - **`category_l1`: "Transfer"**
-                - `category_l2`: "Credit Card Payment", "Internal Transfer", "ATM Withdrawal"
-        * Use the `persona_type` to inform your categorization. For example, a "Full-Time Rideshare Driver" might have income from "UBER" or "LYFT" that should be categorized as "Gig Income", not "Payroll".
-    4.  **Update Batch:** Call `update_transactions_with_ai_categories` **once** with all your categorizations for the batch.
-    5.  **Report Summary:** Use the `summary` from the update tool to create a data-driven and visually appealing markdown report. Include the number of transactions categorized and a breakdown of the top categories. Example: '**Transaction Batch Processed**\n\nSuccessfully categorized **150** debit transactions. Top categories assigned:\n- Shopping: 45 transactions\n- Food & Dining: 32 transactions\n- Bills & Utilities: 25 transactions'
+        - If the tool returns "complete", escalate immediately.
+        - For each transaction, apply the **LOGICAL RULES** and **VALID CATEGORIES**. Use `persona_type` for context (e.g., 'UBER' income for a 'Full-Time Rideshare Driver' is 'Gig Income').
+    4.  **Update Batch:** Call `update_transactions_with_ai_categories` **once** with all categorizations for the batch.
+    5.  **Report Summary:** Use the `summary` to create a data-driven markdown report.
+        - **Example:** '**Transaction Batch Processed**\n\nSuccessfully categorized **150** debit transactions. Top categories assigned:\n- Shopping: 45 transactions\n- Food & Dining: 32 transactions'
     """,
 )
 
@@ -288,6 +287,7 @@ financial_transaction_categorizer = Agent(
             - `category_l2` (STRING): The sub-category (e.g., 'Groceries', 'Shopping').
             - `is_recurring` (BOOL): Flag for recurring transactions.
             - `channel` (STRING): The source channel (e.g., 'Online', 'In-store').
+            - `categorization_method` (STRING): The method for which the transaction has been categorized.
 
         - **`{RULES_TABLE_ID}` (categorization_rules)**: Stores rules for categorization.
           - **Key Columns**:

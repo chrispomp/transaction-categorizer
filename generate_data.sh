@@ -33,10 +33,10 @@ DATASET_ID = os.getenv("DATASET_ID", "equifax_txns")
 TABLE_ID = "transactions"
 
 # --- Generation Parameters ---
-NUM_CONSUMERS_TO_GENERATE = 10
+NUM_CONSUMERS_TO_GENERATE = 5
 MIN_VARIABLE_TRANSACTIONS_PER_MONTH = 35
 MAX_VARIABLE_TRANSACTIONS_PER_MONTH = 50
-TRANSACTION_HISTORY_MONTHS = 6
+TRANSACTION_HISTORY_MONTHS = 12
 CONCURRENT_CONSUMER_JOBS = 10
 
 # --- Setup Logging ---
@@ -259,7 +259,7 @@ try:
     if not PROJECT_ID or "your-gcp-project-id" in PROJECT_ID:
         raise ValueError("PROJECT_ID is not set correctly.")
     vertexai.init(project=PROJECT_ID, location=LOCATION)
-    model = GenerativeModel("gemini-2.5-flash-lite")
+    model = GenerativeModel("gemini-2.5-flash")
     bq_client = bigquery.Client(project=PROJECT_ID)
     logging.info(f"Initialized Vertex AI and BigQuery for project '{PROJECT_ID}'")
 except Exception as e:
@@ -515,13 +515,22 @@ async def generate_gig_worker_transactions_main(num_consumers: int, min_txns_mon
     logging.info(f"--- Starting High-Fidelity Synthetic Data Generation for {num_consumers} Consumers ---")
     setup_bigquery_table()
     
+    # 1. Create a shuffled list of personas to pull from
+    shuffled_personas = random.sample(PERSONAS, len(PERSONAS))
+    num_unique_personas = len(shuffled_personas)
+
     consumer_profiles = []
-    for _ in range(num_consumers):
+    # Use an enumerator 'i' for indexing
+    for i in range(num_consumers):
         consumer_name = fake.name()
         institutions_for_consumer = random.sample(INSTITUTION_NAMES, k=min(len(INSTITUTION_NAMES), 2))
+        
+        # 2. Assign a persona by cycling through the shuffled list
+        persona_to_assign = shuffled_personas[i % num_unique_personas]
+        
         profile = {
             "consumer_name": consumer_name,
-            "persona": random.choice(PERSONAS),
+            "persona": persona_to_assign, # Use the assigned persona
             "accounts": {
                 "Checking Account": {"account_id": f"ACC-{str(uuid.uuid4())[:12].upper()}", "institution_name": institutions_for_consumer[0]},
                 "Credit Card": {"account_id": f"ACC-{str(uuid.uuid4())[:12].upper()}", "institution_name": institutions_for_consumer[1]},

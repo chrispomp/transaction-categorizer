@@ -224,7 +224,7 @@ def apply_rules_based_categorization() -> str:
                 r.category_l1,
                 r.category_l2,
                 r.is_recurring_rule,
-                'rules-based-' || r.rule_type AS method,
+                'rules-based-' || LOWER(r.rule_type) AS method,
                 -- Prioritize persona-specific rules over global rules
                 ROW_NUMBER() OVER(
                     PARTITION BY t.transaction_id
@@ -236,8 +236,8 @@ def apply_rules_based_categorization() -> str:
             FROM `{TABLE_ID}` t
             JOIN `{RULES_TABLE_ID}` r
                 ON (
-                    (r.rule_type = 'MERCHANT' AND t.merchant_name_cleaned = r.identifier) OR
-                    (r.rule_type = 'PATTERN' AND STRPOS(t.description_cleaned, r.identifier) > 0)
+                    (r.rule_type = 'merchant' AND t.merchant_name_cleaned = r.identifier) OR
+                    (r.rule_type = 'pattern' AND STRPOS(t.description_cleaned, r.identifier) > 0)
                 )
                 AND (t.persona_type = r.persona_type OR r.persona_type IS NULL) -- Match persona or global
                 AND t.transaction_type = r.transaction_type
@@ -897,7 +897,7 @@ def learn_new_categorization_rules() -> str:
             MERGE `{RULES_TABLE_ID}` R
             USING `{TEMP_TABLE_ID}` NewRules
             ON R.identifier = NewRules.identifier
-                AND R.rule_type = 'MERCHANT'
+                AND R.rule_type = 'merchant'
                 AND R.transaction_type = NewRules.transaction_type
                 AND IFNULL(R.persona_type, 'none') = IFNULL(NewRules.persona_type, 'none')
             WHEN MATCHED AND NewRules.confidence_score > R.confidence_score THEN
@@ -910,7 +910,7 @@ def learn_new_categorization_rules() -> str:
             WHEN NOT MATCHED THEN
                 INSERT (rule_id, rule_type, identifier, transaction_type, persona_type, category_l1, category_l2, is_recurring_rule, confidence_score, created_timestamp, last_updated_timestamp, is_active)
                 VALUES (
-                    GENERATE_UUID(), 'MERCHANT', NewRules.identifier, NewRules.transaction_type,
+                    GENERATE_UUID(), 'merchant', NewRules.identifier, NewRules.transaction_type,
                     NewRules.persona_type, NewRules.category_l1, NewRules.category_l2,
                     NewRules.is_recurring_rule, NewRules.confidence_score,
                     CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP(), TRUE
@@ -947,8 +947,8 @@ def create_new_categorization_rule(
     """
     logger.info(f"Attempting to add/update rule for identifier: '{identifier}', persona: '{persona_type or 'Global'}'")
 
-    if rule_type not in ['MERCHANT', 'PATTERN']:
-        return f"❌ Invalid rule_type: '{rule_type}'. Must be 'MERCHANT' or 'PATTERN'."
+    if rule_type.lower() not in ['merchant', 'pattern']:
+        return f"❌ Invalid rule_type: '{rule_type}'. Must be 'merchant' or 'pattern'."
     if transaction_type not in ['Debit', 'Credit', 'All']:
         return f"❌ Invalid transaction_type: '{transaction_type}'. Must be 'Debit', 'Credit', or 'All'."
     if not is_valid_category(category_l1, category_l2):
@@ -985,7 +985,7 @@ def create_new_categorization_rule(
     job_config = bigquery.QueryJobConfig(
         query_parameters=[
             bigquery.ScalarQueryParameter("identifier", "STRING", identifier.lower()),
-            bigquery.ScalarQueryParameter("rule_type", "STRING", rule_type),
+            bigquery.ScalarQueryParameter("rule_type", "STRING", rule_type.lower()),
             bigquery.ScalarQueryParameter("transaction_type", "STRING", transaction_type),
             bigquery.ScalarQueryParameter("persona_type", "STRING", persona_type),
             bigquery.ScalarQueryParameter("category_l1", "STRING", category_l1),
@@ -1067,14 +1067,14 @@ def backfill_confidence_scores() -> str:
     # Step 2: For each rule, count matching transactions to determine its new score
     updates = []
     for _, rule in rules_df.iterrows():
-        if rule['rule_type'] == 'MERCHANT':
+        if rule['rule_type'] == 'merchant':
             count_query = f"""
                 SELECT COUNT(transaction_id) as count
                 FROM `{TABLE_ID}`
                 WHERE merchant_name_cleaned = '{rule['identifier']}'
                   AND transaction_type = '{rule['transaction_type']}'
             """
-        elif rule['rule_type'] == 'PATTERN':
+        elif rule['rule_type'] == 'pattern':
             count_query = f"""
                 SELECT COUNT(transaction_id) as count
                 FROM `{TABLE_ID}`
