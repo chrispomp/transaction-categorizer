@@ -182,7 +182,7 @@ individual_transaction_categorization_workflow = LoopAgent(
 # --- OPTIMIZATION: Controller Agent to Manage Credit/Debit Runs ---
 credit_debit_categorization_controller = LlmAgent(
     name="credit_debit_categorization_controller",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     tools=[AgentTool(agent=individual_transaction_categorization_workflow)],
     instruction="""
     You are a workflow orchestrator. Your sole responsibility is to categorize all remaining credit and debit transactions by running the `individual_transaction_categorization_workflow` agent in two distinct phases.
