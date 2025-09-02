@@ -56,32 +56,33 @@ def get_data_quality_report() -> str:
     """
     logger.info("Starting data quality audit...")
     queries = {
-        "Categorization Status": {
-            "query": f"SELECT COALESCE(category_l1, 'Uncategorized') as category, COUNT(transaction_id) as transaction_count FROM `{TABLE_ID}` GROUP BY 1 ORDER BY transaction_count DESC;",
-            "summary": "Overview of categorized vs. uncategorized transactions."
+        "Categorization Status by Persona": {
+            "query": f"SELECT COALESCE(persona_type, 'Unknown') as persona, COALESCE(category_l1, 'Uncategorized') as category, COUNT(transaction_id) as transaction_count FROM `{TABLE_ID}` GROUP BY 1, 2 ORDER BY persona, transaction_count DESC;",
+            "summary": "Overview of categorized vs. uncategorized transactions for each persona."
         },
-        "Uncategorized Transactions Breakdown": {
-            "query": f"SELECT CASE WHEN category_l1 IS NULL AND category_l2 IS NULL THEN 'Missing L1 & L2' WHEN category_l1 IS NULL THEN 'Missing L1 Only' WHEN category_l2 IS NULL THEN 'Missing L2 Only' END AS issue_type, transaction_type, channel, COUNT(transaction_id) AS transaction_count FROM `{TABLE_ID}` WHERE category_l1 IS NULL OR category_l2 IS NULL GROUP BY 1, 2, 3 ORDER BY transaction_count DESC;",
-            "summary": "Breakdown of transactions missing one or both category labels."
+        "Uncategorized Transactions Breakdown by Persona": {
+            "query": f"SELECT COALESCE(persona_type, 'Unknown') as persona, CASE WHEN category_l1 IS NULL AND category_l2 IS NULL THEN 'Missing L1 & L2' WHEN category_l1 IS NULL THEN 'Missing L1 Only' WHEN category_l2 IS NULL THEN 'Missing L2 Only' END AS issue_type, transaction_type, channel, COUNT(transaction_id) AS transaction_count FROM `{TABLE_ID}` WHERE category_l1 IS NULL OR category_l2 IS NULL GROUP BY 1, 2, 3, 4 ORDER BY persona, transaction_count DESC;",
+            "summary": "Breakdown of transactions missing one or both category labels, segmented by persona."
         },
         "Mismatched Transaction Types": {
-            "query": f"SELECT transaction_id, transaction_type, category_l1, category_l2, merchant_name_cleaned, amount FROM `{TABLE_ID}` WHERE (category_l1 = 'Income' AND (transaction_type = 'Debit' OR amount < 0)) OR (category_l1 = 'Expense' AND (transaction_type = 'Credit' OR amount > 0)) ORDER BY amount DESC;",
+            "query": f"SELECT transaction_id, persona_type, transaction_type, category_l1, category_l2, merchant_name_cleaned, amount FROM `{TABLE_ID}` WHERE (category_l1 = 'Income' AND (transaction_type = 'Debit' OR amount < 0)) OR (category_l1 = 'Expense' AND (transaction_type = 'Credit' OR amount > 0)) ORDER BY amount DESC;",
             "summary": "Highlights conflicts where transaction direction (Debit/Credit) contradicts the L1 category (Income/Expense)."
         },
-        "Inconsistent Recurring Transactions": {
+        "Inconsistent Recurring Transactions by Persona": {
             "query": f"""
                 SELECT
+                    persona_type,
                     merchant_name_cleaned,
                     COUNT(DISTINCT category_l2) AS distinct_category_count,
                     ARRAY_AGG(DISTINCT category_l2 IGNORE NULLS) AS categories_assigned,
                     COUNT(t.transaction_id) AS total_inconsistent_transactions
                 FROM `{TABLE_ID}` AS t
                 WHERE t.is_recurring = TRUE AND t.merchant_name_cleaned IS NOT NULL
-                GROUP BY 1
+                GROUP BY 1, 2
                 HAVING COUNT(DISTINCT category_l2) > 1
-                ORDER BY total_inconsistent_transactions DESC;
+                ORDER BY persona_type, total_inconsistent_transactions DESC;
             """,
-            "summary": "Lists recurring transactions from the same merchant that have been assigned multiple, conflicting L2 categories."
+            "summary": "Lists recurring transactions from the same merchant that have been assigned multiple, conflicting L2 categories, broken down by persona."
         }
     }
     results_markdown = "📊 **Data Quality Audit Report**\n\nHere's a summary of the data quality checks. Any tables below indicate areas that may need attention.\n"
@@ -310,13 +311,14 @@ def review_and_resolve_rule_conflicts() -> str:
                 identifier,
                 rule_type,
                 transaction_type,
+                persona_type,
                 ARRAY_AGG(STRUCT(rule_id, category_l1, category_l2, confidence_score, last_updated_timestamp)) AS rules
             FROM `{RULES_TABLE_ID}`
             WHERE is_active = TRUE
-            GROUP BY 1, 2, 3
+            GROUP BY 1, 2, 3, 4
             HAVING COUNT(DISTINCT FORMAT('%T', (category_l1, category_l2))) > 1
         )
-        SELECT identifier, rule_type, transaction_type, rules FROM ConflictingRules
+        SELECT identifier, rule_type, transaction_type, persona_type, rules FROM ConflictingRules
     """
     try:
         conflicts_df = bq_client.query(conflict_query).to_dataframe()
@@ -332,7 +334,7 @@ def review_and_resolve_rule_conflicts() -> str:
         model="gemini-2.5-flash",
         instruction="""
         You are a data analyst specializing in financial transaction categorization.
-        You will be given a JSON object representing a set of conflicting rules for a single identifier.
+        You will be given a JSON object representing a set of conflicting rules for a single identifier and persona.
         Your task is to analyze the rules and decide which one is the most correct.
         Consider the confidence_score (higher is better) and last_updated_timestamp (more recent is better).
         You MUST respond with a valid JSON object with two keys:
@@ -578,12 +580,13 @@ def get_uncategorized_merchants_batch(tool_context: ToolContext, batch_size: int
             SELECT
                 merchant_name_cleaned,
                 transaction_type,
+                persona_type,
                 COUNT(transaction_id) as uncategorized_count
             FROM `{TABLE_ID}`
             WHERE (category_l1 IS NULL OR category_l2 IS NULL)
                 AND merchant_name_cleaned IS NOT NULL AND merchant_name_cleaned != ''
                 AND category_l1 IS DISTINCT FROM 'Transfer'
-            GROUP BY 1, 2
+            GROUP BY 1, 2, 3
             HAVING COUNT(transaction_id) >= 2
             ORDER BY uncategorized_count DESC
             LIMIT {batch_size}
@@ -591,6 +594,7 @@ def get_uncategorized_merchants_batch(tool_context: ToolContext, batch_size: int
         SELECT
             g.merchant_name_cleaned,
             g.transaction_type,
+            g.persona_type,
             g.uncategorized_count,
             ARRAY_AGG(
                 STRUCT(
@@ -604,8 +608,9 @@ def get_uncategorized_merchants_batch(tool_context: ToolContext, batch_size: int
         JOIN TopMerchantGroups g
             ON t.merchant_name_cleaned = g.merchant_name_cleaned
             AND t.transaction_type = g.transaction_type
+            AND IFNULL(t.persona_type, 'none') = IFNULL(g.persona_type, 'none')
         WHERE (t.category_l1 IS NULL OR t.category_l2 IS NULL)
-        GROUP BY 1, 2, 3;
+        GROUP BY 1, 2, 3, 4;
     """
     try:
         df = bq_client.query(query).to_dataframe()
@@ -624,7 +629,7 @@ def get_uncategorized_merchants_batch(tool_context: ToolContext, batch_size: int
 def apply_bulk_merchant_update(categorized_json_string: str) -> str:
     """Applies categories to a batch of merchants from a validated JSON string."""
     logger.info("Applying bulk merchant update...")
-    validated_df = _validate_bulk_llm_results(categorized_json_string, ['merchant_name_cleaned', 'transaction_type'])
+    validated_df = _validate_bulk_llm_results(categorized_json_string, ['merchant_name_cleaned', 'transaction_type', 'persona_type'])
     if validated_df.empty:
         return json.dumps({"status": "success", "updated_count": 0, "message": "No valid merchant categorizations to apply."})
 
@@ -638,6 +643,7 @@ def apply_bulk_merchant_update(categorized_json_string: str) -> str:
             USING `{TEMP_TABLE_ID}` U
                 ON T.merchant_name_cleaned = U.merchant_name_cleaned
                 AND T.transaction_type = U.transaction_type
+                AND IFNULL(T.persona_type, 'none') = IFNULL(U.persona_type, 'none')
             WHEN MATCHED AND (T.category_l1 IS NULL OR T.category_l2 IS NULL) THEN
                 UPDATE SET
                     T.category_l1 = U.category_l1,
@@ -650,7 +656,7 @@ def apply_bulk_merchant_update(categorized_json_string: str) -> str:
         updated_count = merge_job.num_dml_affected_rows or 0
         logger.info("✅ Successfully bulk-updated %d records for merchants.", updated_count)
     
-        summary = validated_df[['merchant_name_cleaned', 'category_l1', 'category_l2']].to_dict(orient='records')
+        summary = validated_df[['merchant_name_cleaned', 'persona_type', 'category_l1', 'category_l2']].to_dict(orient='records')
         return json.dumps({"status": "success", "updated_count": updated_count, "summary": summary})
 
     except (GoogleAPICallError, Exception) as e:
@@ -666,12 +672,13 @@ def get_uncategorized_patterns_batch(tool_context: ToolContext, batch_size: int 
                 SUBSTR(description_cleaned, 1, 40) AS description_prefix,
                 transaction_type,
                 channel,
+                persona_type,
                 COUNT(transaction_id) as uncategorized_count
             FROM `{TABLE_ID}`
             WHERE (category_l1 IS NULL OR category_l2 IS NULL)
                 AND description_cleaned IS NOT NULL AND description_cleaned != ''
                 AND category_l1 IS DISTINCT FROM 'Transfer'
-            GROUP BY 1, 2, 3
+            GROUP BY 1, 2, 3, 4
             HAVING COUNT(transaction_id) >= 2
             ORDER BY uncategorized_count DESC
             LIMIT {batch_size}
@@ -680,6 +687,7 @@ def get_uncategorized_patterns_batch(tool_context: ToolContext, batch_size: int 
             g.description_prefix,
             g.transaction_type,
             g.channel,
+            g.persona_type,
             g.uncategorized_count,
             ARRAY_AGG(
                 STRUCT(
@@ -694,8 +702,9 @@ def get_uncategorized_patterns_batch(tool_context: ToolContext, batch_size: int 
             ON SUBSTR(t.description_cleaned, 1, 40) = g.description_prefix
             AND t.transaction_type = g.transaction_type
             AND t.channel = g.channel
+            AND IFNULL(t.persona_type, 'none') = IFNULL(g.persona_type, 'none')
         WHERE (t.category_l1 IS NULL OR t.category_l2 IS NULL)
-        GROUP BY 1, 2, 3, 4;
+        GROUP BY 1, 2, 3, 4, 5;
     """
     try:
         df = bq_client.query(query).to_dataframe()
@@ -715,7 +724,7 @@ def get_uncategorized_patterns_batch(tool_context: ToolContext, batch_size: int 
 def apply_bulk_pattern_update(categorized_json_string: str) -> str:
     """Applies categories to a batch of transaction patterns from a validated JSON string."""
     logger.info("Applying bulk pattern update...")
-    validated_df = _validate_bulk_llm_results(categorized_json_string, ['description_prefix', 'transaction_type', 'channel'])
+    validated_df = _validate_bulk_llm_results(categorized_json_string, ['description_prefix', 'transaction_type', 'channel', 'persona_type'])
     if validated_df.empty:
         return json.dumps({"status": "success", "updated_count": 0, "message": "No valid pattern categorizations to apply."})
 
@@ -730,6 +739,7 @@ def apply_bulk_pattern_update(categorized_json_string: str) -> str:
                 ON SUBSTR(T.description_cleaned, 1, 40) = U.description_prefix
                 AND T.transaction_type = U.transaction_type
                 AND T.channel = U.channel
+                AND IFNULL(T.persona_type, 'none') = IFNULL(U.persona_type, 'none')
             WHEN MATCHED AND (T.category_l1 IS NULL OR T.category_l2 IS NULL) THEN
                 UPDATE SET
                     T.category_l1 = U.category_l1,
@@ -742,7 +752,7 @@ def apply_bulk_pattern_update(categorized_json_string: str) -> str:
         updated_count = merge_job.num_dml_affected_rows or 0
         logger.info("✅ Successfully bulk-updated %d records for patterns.", updated_count)
     
-        summary = validated_df[['description_prefix', 'category_l1', 'category_l2']].to_dict(orient='records')
+        summary = validated_df[['description_prefix', 'persona_type', 'category_l1', 'category_l2']].to_dict(orient='records')
         return json.dumps({"status": "success", "updated_count": updated_count, "summary": summary})
 
     except (GoogleAPICallError, Exception) as e:
@@ -762,7 +772,7 @@ def get_transaction_batch_for_ai_categorization(tool_context: ToolContext, batch
     fetch_sql = f"""
         SELECT
             transaction_id, description_cleaned, merchant_name_cleaned, amount,
-            transaction_type, channel, account_type, institution_name
+            transaction_type, persona_type, channel, account_type, institution_name
         FROM `{TABLE_ID}`
         WHERE (category_l1 IS NULL OR category_l2 IS NULL)
             AND category_l1 IS DISTINCT FROM 'Transfer'

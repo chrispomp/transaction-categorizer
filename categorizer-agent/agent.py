@@ -78,14 +78,14 @@ merchant_categorization_agent = LlmAgent(
 
     **Your process is a strict, two-step sequence:**
     1.  **FETCH BATCH**: Call `get_uncategorized_merchants_batch`. If the tool returns a "complete" status, you must stop and escalate.
-    2.  **ANALYZE & UPDATE BATCH**: Analyze the JSON data for ALL merchants in the batch. You **MUST ONLY** use `category_l1` and `category_l2` from this list: {VALID_CATEGORIES_JSON_STR}.
-            - **CRITICAL**: You **MUST ONLY** use `category_l1` and `category_l2` from this valid list: {VALID_CATEGORIES_JSON_STR}.
-            - category_l1 can only be either "Income", "Expense" or "Transfer".
-            - category_l2 can only be:
-                - when category_l1 is "Income": "Gig Income", "Payroll", "Other Income", "Refund"
-                - when category_l1 is"Expense": "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
-                - when category_l1 is"Transfer": "Credit Card Payment", "Internal Transfer", "ATM Withdrawal"
-        - **NON-NEGOTIABLE**: This is a critical constraint. Do not invent, create, or use any category not explicitly provided.
+    2.  **ANALYZE & UPDATE BATCH**: Analyze the JSON data for ALL merchants in the batch.
+        - **CRITICAL**: You **MUST ONLY** use `category_l1` and `category_l2` from the valid list below. Do not invent, create, or use any category not explicitly provided.
+            - **`category_l1`: "Income"**
+                - `category_l2`: "Gig Income", "Payroll", "Other Income", "Refund"
+            - **`category_l1`: "Expense"**
+                - `category_l2`: "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
+            - **`category_l1`: "Transfer"**
+                - `category_l2`: "Credit Card Payment", "Internal Transfer", "ATM Withdrawal"
         - Then, call `apply_bulk_merchant_update` ONCE with a single JSON array. Each merchant object MUST include `merchant_name_cleaned`, `transaction_type`, `category_l1`, and `category_l2`.
     3.  **REPORT BATCH**: The tool returns `updated_count` and a `summary`. Create an insightful, data-driven markdown report. Example: "**🛒 Merchant Batch Categorized**\n\nI processed a batch of **3** merchants, updating **112** transactions. Key updates include:\n- 'grubhub' -> Food & Dining\n- 'shell' -> Auto & Transport"
     """,
@@ -164,13 +164,14 @@ individual_transaction_categorizer_agent = LlmAgent(
     2.  **Fetch Batch:** Call the `get_transaction_batch_for_ai_ categorization` tool, passing the correct `transaction_type` ('Credit' or 'Debit') that you determined in the previous step.
     3.  **Analyze & Categorize:**
         * If the tool returns "complete", escalate immediately.
-        * For each transaction, assign `category_l1` and `category_l2` based **strictly** on this list: {VALID_CATEGORIES_JSON_STR}.
-        * **CRITICAL**: You **MUST ONLY** use `category_l1` and `category_l2` from this valid list: {VALID_CATEGORIES_JSON_STR}.
-            - category_l1 can only be either "Income", "Expense" or "Transfer".
-            - category_l2 can only be:
-                - when category_l1 is "Income": "Gig Income", "Payroll", "Other Income", "Refund"
-                - when category_l1 is"Expense": "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
-                - when category_l1 is"Transfer": "Credit Card Payment", "Internal Transfer", "ATM Withdrawal"
+        * For each transaction, assign `category_l1` and `category_l2` based **strictly** on the list below.
+        * **CRITICAL**: You **MUST ONLY** use `category_l1` and `category_l2` from this valid list. Do not invent, create, or use any category not explicitly provided.
+            - **`category_l1`: "Income"**
+                - `category_l2`: "Gig Income", "Payroll", "Other Income", "Refund"
+            - **`category_l1`: "Expense"**
+                - `category_l2`: "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
+            - **`category_l1`: "Transfer"**
+                - `category_l2`: "Credit Card Payment", "Internal Transfer", "ATM Withdrawal"
         * Use the `persona_type` to inform your categorization. For example, a "Full-Time Rideshare Driver" might have income from "UBER" or "LYFT" that should be categorized as "Gig Income", not "Payroll".
     4.  **Update Batch:** Call `update_transactions_with_ai_categories` **once** with all your categorizations for the batch.
     5.  **Report Summary:** Use the `summary` from the update tool to create a data-driven and visually appealing markdown report. Include the number of transactions categorized and a breakdown of the top categories. Example: '**Transaction Batch Processed**\n\nSuccessfully categorized **150** debit transactions. Top categories assigned:\n- Shopping: 45 transactions\n- Food & Dining: 32 transactions\n- Bills & Utilities: 25 transactions'
@@ -264,8 +265,8 @@ financial_transaction_categorizer = Agent(
     **Custom Rule Creation:**
     - If the user asks to create a new rule (e.g., "set up a rule for medical expenses"), you must guide them through the process.
     - **Analyze the Request:** Determine the key information from the user's request.
-    - **Gather Information:** Ask clarifying questions to get all the required parameters for the `create_new_categorization_rule` tool: `identifier`, `rule_type` ('MERCHANT' or 'PATTERN'), `category_l1`, `category_l2`, and `transaction_type` ('Debit', 'Credit', or 'All'). Also ask if it should be a recurring rule.
-    - **Propose and Confirm:** Propose the complete rule to the user in a clear format. Example: "Great! I'm ready to create a rule. Does this look correct?\\n\\n- **Match On**: 'MEDICAL'\\n- **Rule Type**: PATTERN\\n- **Set Category To**: Expense / Medical\\n- **For Transaction Type**: All\\n- **Mark as Recurring**: No"
+    - **Gather Information:** Ask clarifying questions to get all the required parameters for the `create_new_categorization_rule` tool: `identifier`, `rule_type` ('MERCHANT' or 'PATTERN'), `category_l1`, `category_l2`, `transaction_type` ('Debit', 'Credit', or 'All'), and `persona_type` (optional, for specific personas). Also ask if it should be a recurring rule.
+    - **Propose and Confirm:** Propose the complete rule to the user in a clear format. Example: "Great! I'm ready to create a rule. Does this look correct?\\n\\n- **Match On**: 'MEDICAL'\\n- **Rule Type**: PATTERN\\n- **Set Category To**: Expense / Medical\\n- **For Transaction Type**: All\\n- **For Persona Type**: Global (applies to all)\\n- **Mark as Recurring**: No"
     - **Execute:** Once the user confirms, call the `create_new_categorization_rule` tool with the confirmed parameters.
 
     **Ad-hoc Queries:**
@@ -278,6 +279,7 @@ financial_transaction_categorizer = Agent(
             - `transaction_date` (DATE): The date the transaction occurred.
             - `amount` (FLOAT): The transaction amount.
             - `transaction_type` (STRING): 'Debit' or 'Credit'.
+            - `persona_type` (STRING): The persona of the user.
             - `description_raw` (STRING): The original transaction description.
             - `merchant_name_raw` (STRING): The original merchant name.
             - `description_cleaned` (STRING): Cleaned version of the description.
@@ -292,6 +294,7 @@ financial_transaction_categorizer = Agent(
             - `rule_id` (STRING): Unique identifier for the rule.
             - `identifier` (STRING): The string to match (e.g., merchant or pattern).
             - `rule_type` (STRING): 'MERCHANT' or 'PATTERN'.
+            - `persona_type` (STRING): The persona this rule applies to.
             - `category_l1` (STRING): L1 category.
             - `category_l2` (STRING): L2 category.
             - `transaction_type` (STRING): 'Debit', 'Credit', or 'All'.
