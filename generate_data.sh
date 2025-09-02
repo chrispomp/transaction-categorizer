@@ -1,6 +1,6 @@
 # Generates high-fidelity, narratively cohesive synthetic data for testing
 # AI/ML models for credit scoring based on transaction history.
-# Version 6.0 - Added raw and cleaned merchant name fields.
+# Version 7.0 - Added 3 new personas and optimized prompt engineering.
 
 import os
 import json
@@ -59,15 +59,21 @@ EXPENSE_TAXONOMY = [
     {"category_l1": "Expense", "category_l2": "Shopping", "tier": "Mid-Range", "merchant": "Amazon.com", "channel": "Card-Not-Present"},
     {"category_l1": "Expense", "category_l2": "Shopping", "tier": "Premium", "merchant": "Lululemon", "channel": "Card-Not-Present"},
     {"category_l1": "Expense", "category_l2": "Entertainment", "tier": "Mid-Range", "merchant": "Netflix.com", "channel": "Card-Not-Present"},
+    {"category_l1": "Expense", "category_l2": "Entertainment", "tier": "Mid-Range", "merchant": "Spotify", "channel": "Card-Not-Present"},
     {"category_l1": "Expense", "category_l2": "Health & Wellness", "tier": "Mid-Range", "merchant": "CVS Pharmacy", "channel": "Point-of-Sale"},
+    {"category_l1": "Expense", "category_l2": "Health & Wellness", "tier": "Premium", "merchant": "SilverSneakers Fitness", "channel": "ACH"},
     {"category_l1": "Expense", "category_l2": "Auto & Transport", "tier": "Mid-Range", "merchant": "Uber", "channel": "Card-Not-Present"},
     {"category_l1": "Expense", "category_l2": "Travel & Vacation", "tier": "Mid-Range", "merchant": "Expedia", "channel": "Card-Not-Present"},
+    {"category_l1": "Expense", "category_l2": "Travel & Vacation", "tier": "Premium", "merchant": "Carnival Cruise Line", "channel": "Card-Not-Present"},
     {"category_l1": "Expense", "category_l2": "Auto & Transport", "tier": "Mid-Range", "merchant": "Shell Gas Station", "channel": "Point-of-Sale"},
     {"category_l1": "Expense", "category_l2": "Software & Tech", "tier": "Premium", "merchant": "ADOBE INC", "channel": "Card-Not-Present"},
     {"category_l1": "Expense", "category_l2": "Shopping", "tier": "Mid-Range", "merchant": "Staples", "channel": "Point-of-Sale"},
+    {"category_l1": "Expense", "category_l2": "Shopping", "tier": "Mid-Range", "merchant": "Home Depot", "channel": "Point-of-Sale"},
+    {"category_l1": "Expense", "category_l2": "Education", "tier": "Premium", "merchant": "University Bookstore", "channel": "Point-of-Sale"},
     {"category_l1": "Expense", "category_l2": "Medical", "tier": "Premium", "merchant": "City Hospital", "channel": "ACH"},
     {"category_l1": "Expense", "category_l2": "Insurance", "tier": "Mid-Range", "merchant": "GEICO", "channel": "ACH"},
     {"category_l1": "Expense", "category_l2": "Bills & Utilities", "tier": "Mid-Range", "merchant": "T-MOBILE", "channel": "ACH"},
+    {"category_l1": "Expense", "category_l2": "Fees & Charges", "tier": "Mid-Range", "merchant": "AARP", "channel": "ACH"},
 ]
 
 INCOME_CATEGORIES = [
@@ -89,6 +95,11 @@ LIFE_EVENT_IMPACT_MATRIX = {
         "category": "Negative Financial Shock", "magnitude_range": (-3000, -500), "duration": 3,
         "primary_signature": {"category_l2": "Medical", "merchant_options": ["Local Hospital Billing", "Specialist Co-Pay", "Out-of-Network Dr."]},
         "secondary_effects_prompt": "Significantly reduce non-essential spending for the next 3 months to accommodate this large, unexpected medical cost."
+    },
+    "Annual Work Bonus": {
+        "category": "Positive Financial Shock", "magnitude_range": (2000, 5000), "duration": 2,
+        "primary_signature": {"category_l2": "Income", "merchant_options": ["ADP PAYROLL BONUS", "COMPANY BONUS DIRECT DEPOSIT"]},
+        "secondary_effects_prompt": "Reflect a temporary increase in high-ticket or premium spending (e.g., Travel & Vacation, Shopping) for the next 2 months following the bonus."
     },
 }
 
@@ -114,6 +125,39 @@ PERSONAS = [
             {"merchant_name": "ADOBE INC", "day_of_month": 5, "amount_mean": -59.99, "amount_std": 0, "category_l1": "Expense", "category_l2": "Software & Tech"},
         ]
     },
+    {
+        "persona_name": "Salaried Tech Professional",
+        "description": "Receives a stable, bi-weekly salary via ADP. Spends on premium groceries, dining out, tech gadgets, and travel. Has consistent, automated savings and bill payments.",
+        "income_merchants": ["ADP", "GOOGLE", "AMAZON WEB SERVICES"], "p2p_income_channels": [],
+        "business_expense_categories": [],
+        "spending_tier_affinities": {"Budget": 0.1, "Mid-Range": 0.3, "Premium": 0.6},
+        "recurring_expenses": [
+            {"merchant_name": "NETFLIX.COM", "day_of_month": 10, "amount_mean": -15.49, "amount_std": 0, "category_l1": "Expense", "category_l2": "Entertainment"},
+            {"merchant_name": "LUXURY APTS RENT", "day_of_month": 1, "amount_mean": -2500.00, "amount_std": 0, "category_l1": "Expense", "category_l2": "Bills & Utilities"},
+        ]
+    },
+    {
+        "persona_name": "University Student",
+        "description": "Receives periodic student loan disbursements and income from a part-time campus job. Spends on textbooks, cheap food, streaming services, and ride-sharing.",
+        "income_merchants": ["UNIVERSITY PAYROLL", "NELNET", "SALLIE MAE"], "p2p_income_channels": ["Venmo"],
+        "business_expense_categories": ["Education"],
+        "spending_tier_affinities": {"Budget": 0.7, "Mid-Range": 0.3, "Premium": 0.0},
+        "recurring_expenses": [
+            {"merchant_name": "Spotify", "day_of_month": 20, "amount_mean": -10.99, "amount_std": 0, "category_l1": "Expense", "category_l2": "Entertainment"},
+            {"merchant_name": "CAMPUS HOUSING", "day_of_month": 1, "amount_mean": -850.00, "amount_std": 0, "category_l1": "Expense", "category_l2": "Bills & Utilities"},
+        ]
+    },
+    {
+        "persona_name": "Retiree on Fixed Income",
+        "description": "Receives a monthly pension and Social Security. Spends on healthcare, groceries, home maintenance, and occasional travel like cruises.",
+        "income_merchants": ["US TREASURY 310", "STATE PENSION FUND"], "p2p_income_channels": [],
+        "business_expense_categories": [],
+        "spending_tier_affinities": {"Budget": 0.4, "Mid-Range": 0.5, "Premium": 0.1},
+        "recurring_expenses": [
+            {"merchant_name": "SilverSneakers Fitness", "day_of_month": 5, "amount_mean": -25.00, "amount_std": 0, "category_l1": "Expense", "category_l2": "Health & Wellness"},
+            {"merchant_name": "AARP", "day_of_month": 12, "amount_mean": -16.00, "amount_std": 0, "category_l1": "Expense", "category_l2": "Fees & Charges"},
+        ]
+    },
 ]
 
 # --- II. HYBRID GENERATION & STATISTICAL MODELING ---
@@ -123,6 +167,7 @@ AMOUNT_DISTRIBUTIONS = {
     "Shopping": {"log_mean": 4.2, "log_std": 1.0}, "Entertainment": {"log_mean": 3.2, "log_std": 0.7},
     "Health & Wellness": {"log_mean": 3.5, "log_std": 0.8}, "Medical": {"log_mean": 4.5, "log_std": 1.1},
     "Auto & Transport": {"log_mean": 3.4, "log_std": 0.9}, "Travel & Vacation": {"log_mean": 5.5, "log_std": 0.8},
+    "Education": {"log_mean": 4.8, "log_std": 1.2}, "Fees & Charges": {"log_mean": 2.9, "log_std": 0.5},
     "Income": {"log_mean": 6.5, "log_std": 0.5}, "Interest Income": {"log_mean": 2.5, "log_std": 0.4},
     "Refund": {"log_mean": 4.0, "log_std": 0.9}, "Other Income": {"log_mean": 5.0, "log_std": 1.2},
     "Peer to Peer Transfer": {"log_mean": 4.8, "log_std": 1.0},
@@ -174,6 +219,10 @@ def build_monthly_prompt(profile: Dict, month_date: datetime, transactions_this_
 
     income_merchant_example = random.choice(persona.get("income_merchants", ["DEPOSIT"]))
     
+    # Dynamically list some relevant expense categories for the persona
+    all_categories = list(AMOUNT_DISTRIBUTIONS.keys())
+    persona_categories = persona.get("business_expense_categories", []) + random.sample([c for c in all_categories if "Income" not in c and "Transfer" not in c and c not in persona.get("business_expense_categories", [])], k=4)
+    
     few_shot_examples = f"""
     **High-Quality Output Examples (for style guidance only):**
     ```json
@@ -191,6 +240,7 @@ def build_monthly_prompt(profile: Dict, month_date: datetime, transactions_this_
     return f"""
     Generate a flat JSON array of exactly {transactions_this_month} realistic, variable bank transactions for '{profile["consumer_name"]}' for **{month_name}**.
     - Persona: '{persona["persona_name"]}' ({persona["description"]})
+    - **Persona Focus:** Generate transactions reflecting spending in categories like: {', '.join(persona_categories)}. Income should primarily come from sources like: {', '.join(persona['income_merchants'])}.
     - **Monthly Narrative:** {narrative_block}
     **CRITICAL INSTRUCTIONS:**
     1.  For each transaction, provide a `description_raw`, `merchant_name_raw`, `merchant_name_cleaned`, and `category_l2`.
@@ -355,7 +405,7 @@ def inject_recurring_transactions(profile: Dict, history_months: int) -> List[Di
                 "institution_name": checking_account['institution_name'], "account_type": "Checking Account",
                 "transaction_date": date.isoformat(), "transaction_type": "Debit", "amount": amount, "is_recurring": True,
                 "description_raw": raw_desc, "description_cleaned": clean_description(raw_desc),
-                "merchant_name_raw": bill['merchant_name'], "merchant_name_cleaned": bill['merchant_name'], 
+                "merchant_name_raw": bill['merchant_name'], "merchant_name_cleaned": bill['merchant_name'],
                 "category_l1": bill['category_l1'], "category_l2": bill['category_l2'], "channel": "ACH",
                 "categorization_update_timestamp": datetime.now(timezone.utc).isoformat(),
             })
@@ -379,7 +429,7 @@ def inject_programmatic_event_transactions(profile: Dict, life_events: List[Dict
             "consumer_name": profile['consumer_name'], "persona_type": profile['persona']['persona_name'],
             "institution_name": account['institution_name'], "account_type": account_type, "transaction_date": date.isoformat(),
             "transaction_type": "Credit" if is_credit else "Debit", "amount": amount, "is_recurring": False,
-            "description_raw": raw_desc, "description_cleaned": clean_description(raw_desc), 
+            "description_raw": raw_desc, "description_cleaned": clean_description(raw_desc),
             "merchant_name_raw": merchant, "merchant_name_cleaned": merchant,
             "category_l1": "Income" if is_credit else "Expense", "category_l2": sig['category_l2'], "channel": channel,
             "categorization_update_timestamp": datetime.now(timezone.utc).isoformat(),
@@ -470,7 +520,7 @@ async def generate_gig_worker_transactions_main(num_consumers: int, min_txns_mon
         consumer_name = fake.name()
         institutions_for_consumer = random.sample(INSTITUTION_NAMES, k=min(len(INSTITUTION_NAMES), 2))
         profile = {
-            "consumer_name": consumer_name, 
+            "consumer_name": consumer_name,
             "persona": random.choice(PERSONAS),
             "accounts": {
                 "Checking Account": {"account_id": f"ACC-{str(uuid.uuid4())[:12].upper()}", "institution_name": institutions_for_consumer[0]},
