@@ -41,7 +41,7 @@ def get_data_quality_report() -> str:
             "summary": "Breakdown of transactions missing one or both category labels."
         },
         "Mismatched Transaction Types": {
-            "query": f"SELECT transaction_id, transaction_type, category_l1, category_l2, merchan_name_cleaned, amount FROM `{TABLE_ID}` WHERE (category_l1 = 'Income' AND (transaction_type = 'Debit' OR amount < 0)) OR (category_l1 = 'Expense' AND (transaction_type = 'Credit' OR amount > 0)) GROUP BY 1, 2 ORDER BY transaction_count DESC;",
+            "query": f"SELECT transaction_id, transaction_type, category_l1, category_l2, merchant_name_cleaned, amount FROM `{TABLE_ID}` WHERE (category_l1 = 'Income' AND (transaction_type = 'Debit' OR amount < 0)) OR (category_l1 = 'Expense' AND (transaction_type = 'Credit' OR amount > 0)) ORDER BY amount DESC;",
             "summary": "Highlights conflicts where transaction direction (Debit/Credit) contradicts the L1 category (Income/Expense)."
         },
         "Inconsistent Recurring Transactions": {
@@ -100,7 +100,7 @@ def reset_all_transaction_categorizations(confirm: bool = False) -> str:
         logger.error(f"❌ BigQuery error during reset operation: {e}")
         return f"❌ **Error During Reset**\nA BigQuery error occurred during the reset operation. Please check the logs. Error: {e}"
 
-def run_custom_bigquery_query(query: str) -> str:
+def run_custom_query(query: str) -> str:
     """
     Executes a user-provided SQL query against the transaction data.
     Primarily for SELECT statements to perform custom analysis.

@@ -16,7 +16,7 @@ from .tools import (
     create_new_categorization_rule,
     harmonize_recurring_transaction_categories,
     reset_all_transaction_categorizations,
-    run_custom_bigquery_query,
+    run_custom_query,
     learn_new_categorization_rules,
     get_recurring_transaction_candidates,
     flag_recurring_transactions_in_bulk,
@@ -180,8 +180,8 @@ individual_transaction_categorization_workflow = LoopAgent(
 )
 
 # --- OPTIMIZATION: Controller Agent to Manage Credit/Debit Runs ---
-credit_debit_categorization_controller = LlmAgent(
-    name="credit_debit_categorization_controller",
+txn_categorization_controller = LlmAgent(
+    name="txn_categorization_controller",
     model="gemini-2.5-flash",
     tools=[AgentTool(agent=individual_transaction_categorization_workflow)],
     instruction="""
@@ -203,7 +203,7 @@ financial_transaction_categorizer = Agent(
     tools=[
         get_data_quality_report,
         reset_all_transaction_categorizations,
-        run_custom_bigquery_query,
+        run_custom_query,
         review_and_resolve_rule_conflicts,
         cleanse_transaction_data,
         apply_rules_based_categorization,
@@ -215,7 +215,7 @@ financial_transaction_categorizer = Agent(
         AgentTool(agent=merchant_categorization_workflow),
         AgentTool(agent=pattern_categorization_workflow),
         # OPTIMIZATION: The root agent now calls the controller, not the loop directly.
-        AgentTool(agent=credit_debit_categorization_controller),
+        AgentTool(agent=txn_categorization_controller),
     ],
     instruction=f"""
     You are an elite financial transaction data analyst 🤖. Your purpose is to help users categorize their financial transactions using a powerful and efficient workflow.
@@ -241,7 +241,7 @@ financial_transaction_categorizer = Agent(
             - **Step 3: Rules Application:** Call `apply_rules_based_categorization`.
             - **Step 4: AI Merchant Categorization:** Call the `merchant_categorization_workflow` agent.
             - **Step 5: AI Pattern Categorization:** Call the `pattern_categorization_workflow` agent.
-            - **Step 6: AI Transaction-Level Categorization:** Call the `credit_debit_categorization_controller` agent. This controller will manage the final categorization, processing all credits first, then all debits.
+            - **Step 6: AI Transaction-Level Categorization:** Call the `txn_categorization_controller` agent. This controller will manage the final categorization, processing all credits first, then all debits.
             - **Step 7: Learn New Rules:** Call `learn_new_categorization_rules` to learn from the AI's work.
             - **Step 8: Apply Fallback Categories:** Call `apply_fallback_categorization` to ensure all transactions are categorized.
             - After the final step, provide a concluding summary.
@@ -261,7 +261,7 @@ financial_transaction_categorizer = Agent(
     - **Execute:** Once the user confirms, call the `create_new_categorization_rule` tool with the confirmed parameters.
 
     **Ad-hoc Queries:**
-    - If the user asks a specific question about their data (e.g., "how many transactions from Starbucks?"), use the `run_custom_bigquery_query` tool to answer them.
+    - If the user asks a specific question about their data (e.g., "how many transactions from Starbucks?"), use the `run_custom_query` tool to answer them.
     - To do this effectively, you must understand the available data schemas. The following tables are available within the BigQuery dataset `{PROJECT_ID}.{DATASET_ID}`:
 
         - **`{TABLE_ID}` (transactions)**: Contains the financial transaction data.
@@ -291,6 +291,6 @@ financial_transaction_categorizer = Agent(
             - `confidence_score` (INT64): Confidence level of the rule.
             - `is_active` (BOOL): Whether the rule is currently active.
 
-    - Based on the user's natural language question, you should formulate a valid SQL query using the information above and pass it to the `run_custom_bigquery_query` tool. Always use the `{TABLE_ID}` and `{RULES_TABLE_ID}` variables instead of hardcoded table names.
+    - Based on the user's natural language question, you should formulate a valid SQL query using the information above and pass it to the `run_custom_query` tool. Always use the `{TABLE_ID}` and `{RULES_TABLE_ID}` variables instead of hardcoded table names.
     """
 )
