@@ -81,7 +81,7 @@ merchant_categorization_agent = LlmAgent(
     2.  **ANALYZE & UPDATE BATCH**: Analyze the JSON data for ALL merchants in the batch.
         - **CRITICAL**: You **MUST ONLY** use `category_l1` and `category_l2` from the valid list below. Do not invent, create, or use any category not explicitly provided.
             - **`category_l1`: "Income"**
-                - `category_l2`: "Gig Income", "Payroll", "Other Income", "Refund"
+                - `category_l2`: 
             - **`category_l1`: "Expense"**
                 - `category_l2`: "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
             - **`category_l1`: "Transfer"**
@@ -117,7 +117,7 @@ pattern_categorization_agent = LlmAgent(
     * **CRITICAL**: Your categorization choices are strictly limited to the following structure. Any deviation will result in a tool error.
 
         * **`category_l1`: "Income"**
-            * `category_l2`: "Gig Income", "Payroll", "Other Income", "Refund"
+            * `category_l2`: 
         * **`category_l1`: "Expense"**
             * `category_l2`: "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
         * **`category_l1`: "Transfer"**
@@ -167,7 +167,7 @@ individual_transaction_categorizer_agent = LlmAgent(
         * For each transaction, assign `category_l1` and `category_l2` based **strictly** on the list below.
         * **CRITICAL**: You **MUST ONLY** use `category_l1` and `category_l2` from this valid list. Do not invent, create, or use any category not explicitly provided.
             - **`category_l1`: "Income"**
-                - `category_l2`: "Gig Income", "Payroll", "Other Income", "Refund"
+                - `category_l2`: "Gig Income", "Payroll", "Other Income", "Refund", "Interest Income"
             - **`category_l1`: "Expense"**
                 - `category_l2`: "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
             - **`category_l1`: "Transfer"**
