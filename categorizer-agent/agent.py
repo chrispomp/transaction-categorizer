@@ -66,15 +66,15 @@ merchant_categorization_agent = LlmAgent(
 
     * **Input Merchant**: 'starbucks'
         * **Examples**: [{{"description_cleaned": "starbucks corp", "amount": -5.75}}, {{"description_cleaned": "starbucks 123 main st", "amount": -12.40}}]
-        * **Correct Output**: {{"merchant_name_cleaned": "starbucks", "transaction_type": "Debit", "category_l1": "Expense", "category_l2": "Food & Dining"}}
+        * **Correct Output**: {{"merchant_name_cleaned": "starbucks", "transaction_type": "Debit", "persona_type": "Salaried Tech Professional", "category_l1": "Expense", "category_l2": "Food & Dining"}}
 
     * **Input Merchant**: 'amzn mktp us'
         * **Examples**: [{{"description_cleaned": "amzn mktp us item 123", "amount": -25.99}}, {{"description_cleaned": "amazon marketplace", "amount": -9.99}}]
-        * **Correct Output**: {{"merchant_name_cleaned": "amzn mktp us", "transaction_type": "Debit", "category_l1": "Expense", "category_l2": "Shopping"}}
+        * **Correct Output**: {{"merchant_name_cleaned": "amzn mktp us", "transaction_type": "Debit", "persona_type": "Salaried Tech Professional", "category_l1": "Expense", "category_l2": "Shopping"}}
 
     * **Input Merchant**: 'adp payroll'
         * **Examples**: [{{"description_cleaned": "direct deposit adp", "amount": 2500.00}}]
-        * **Correct Output**: {{"merchant_name_cleaned": "adp payroll", "transaction_type": "Credit", "category_l1": "Income", "category_l2": "Payroll"}}
+        * **Correct Output**: {{"merchant_name_cleaned": "adp payroll", "transaction_type": "Credit", "persona_type": "Salaried Tech Professional", "category_l1": "Income", "category_l2": "Payroll"}}
 
     **Your process is a strict, two-step sequence:**
     1.  **FETCH BATCH**: Call `get_uncategorized_merchants_batch`. If the tool returns a "complete" status, you must stop and escalate.
@@ -86,7 +86,7 @@ merchant_categorization_agent = LlmAgent(
                 - `category_l2`: "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
             - **`category_l1`: "Transfer"**
                 - `category_l2`: "Credit Card Payment", "Internal Transfer", "ATM Withdrawal"
-        - Then, call `apply_bulk_merchant_update` ONCE with a single JSON array. Each merchant object MUST include `merchant_name_cleaned`, `transaction_type`, `category_l1`, and `category_l2`.
+        - Then, call `apply_bulk_merchant_update` ONCE with a single JSON array. Each merchant object MUST include `merchant_name_cleaned`, `transaction_type`, `persona_type`, `category_l1`, and `category_l2`.
     3.  **REPORT BATCH**: The tool returns `updated_count` and a `summary`. Create an insightful, data-driven markdown report. Example: "**🛒 Merchant Batch Categorized**\n\nI processed a batch of **3** merchants, updating **112** transactions. Key updates include:\n- 'grubhub' -> Food & Dining\n- 'shell' -> Auto & Transport"
     """,
 )
@@ -126,7 +126,7 @@ pattern_categorization_agent = LlmAgent(
 
     ### 3. Apply Bulk Update
     * After analyzing **ALL** patterns in the batch, you **MUST** call the `apply_bulk_pattern_update` tool **only once**.
-    * Your input to this tool must be a single JSON array containing an entry for every pattern you received in the batch.
+    * Your input to this tool must be a single JSON array containing an entry for every pattern you received in the batch. Each object in the array MUST include `description_prefix`, `transaction_type`, `channel`, `persona_type`, `category_l1`, and `category_l2`.
 
     ### 4. Report on Batch
     * The `apply_bulk_pattern_update` tool will return an `updated_count` and a `summary`.
