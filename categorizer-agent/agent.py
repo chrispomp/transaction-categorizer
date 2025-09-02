@@ -121,32 +121,33 @@ single_transaction_categorizer_agent = LlmAgent(
     model="gemini-2.5-flash",
     tools=[fetch_batch_for_ai_categorization, update_categorizations_in_bigquery],
     instruction=f"""
-    Your purpose is to perform one cycle of detailed, transaction-by-transaction categorization and report the result with enhanced detail.
+    Your purpose is to perform AI-powered, transaction-by-transaction categorization in a structured, two-phase process, providing summaries at each stage.
 
-    **Your process is a strict, three-step sequence:**
-    1.  **FETCH**: Call `fetch_batch_for_ai_categorization`. If it returns "complete", escalate immediately.
-    2.  **CATEGORIZE & UPDATE**: Call `update_categorizations_in_bigquery` with a `categorized_json_string`.
-        - **CRITICAL**: You **MUST ONLY** use `category_l1` and `category_l2` from this valid list: {VALID_CATEGORIES_JSON_STR}.
-            - category_l1 can only be either "Income", "Expense" or "Transfer".
-            - category_l2 can only be:
-                - when category_l1 is "Income": "Gig Income", "Payroll", "Other Income", "Refund"
-                - when category_l1 is"Expense": "Groceries", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services"
-                - when category_l1 is"Transfer": "Credit Card Payment", "Internal Transfer"
-        - **NON-NEGOTIABLE**: Do not invent, create, or use any category not explicitly provided. For example, do not create subcategories like 'Restaurants' for 'Food & Dining'. You must use one of the existing, valid L2 categories. Any category not in the list will be rejected.
+    **Phase 1: Credit Transaction Categorization**
+    1.  **FETCH CREDITS**: Call `fetch_batch_for_ai_categorization` with `transaction_type='Credit'`.
+        - If it returns "complete", this phase is done. Proceed to Phase 2.
+    2.  **CATEGORIZE & UPDATE**: Analyze the batch and call `update_categorizations_in_bigquery` with a `categorized_json_string`.
+        - **CRITICAL**: You **MUST ONLY** use `category_l1` and `category_l2` from this valid list: {VALID_CATEGORIES_JSON_STR}. Adherence is mandatory.
         - The JSON string MUST be a JSON array of objects, each with `transaction_id`, `category_l1`, and `category_l2`.
-    3.  **REPORT**: The update tool returns `updated_count` and a `summary`. Present this clearly in markdown.
-        - Example:
-            "✅ Processed a batch of 198 transactions.
-            - **Shopping**: 75 transactions
-            - **Groceries**: 50 transactions
-            Now moving to the next batch..."
+    3.  **REPORT CREDITS**: The update tool returns `updated_count` and a `summary`. Present this clearly in markdown.
+        - Example: "✅ **Credits Complete**: Processed a batch of 50 credit transactions. Key categories assigned: **Payroll** (20), **Refund** (30)."
+        - After reporting, you must loop back to step 1 of this phase to process the next batch of credits.
+
+    **Phase 2: Debit Transaction Categorization**
+    1.  **FETCH DEBITS**: Call `fetch_batch_for_ai_categorization` with `transaction_type='Debit'`.
+        - If it returns "complete", the entire process is finished. Escalate immediately.
+    2.  **CATEGORIZE & UPDATE**: Analyze the batch and call `update_categorizations_in_bigquery` with a `categorized_json_string`.
+        - **CRITICAL**: You **MUST ONLY** use `category_l1` and `category_l2` from this valid list: {VALID_CATEGORIES_JSON_STR}. Adherence is mandatory.
+    3.  **REPORT DEBITS**: The update tool returns `updated_count` and a `summary`. Present this clearly in markdown.
+        - Example: "✅ **Debits Complete**: Processed a batch of 150 debit transactions. Top categories: **Shopping** (75), **Groceries** (50)."
+        - After reporting, you must loop back to step 1 of this phase to process the next batch of debits.
     """,
 )
 
 transaction_categorization_loop = LoopAgent(
     name="transaction_categorization_loop",
     description="This agent starts the final, granular categorization. It automatically processes remaining transactions in batches, providing a detailed summary for each.",
-    max_iterations=50
+    max_iterations=100
 )
 transaction_categorization_loop.sub_agents.append(single_transaction_categorizer_agent)
 

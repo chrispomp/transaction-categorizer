@@ -752,9 +752,14 @@ def apply_bulk_pattern_update(categorized_json_string: str) -> str:
 
 
 # --- Phase 4: Transaction-Level AI & Learning Tools ---
-def fetch_batch_for_ai_categorization(tool_context: ToolContext, batch_size: int = 300) -> str:
-    """Fetches a batch of individual uncategorized transactions for detailed, row-by-row AI processing."""
-    logger.info(f"Fetching batch for AI categorization with enriched context. Batch size: {batch_size}")
+def fetch_batch_for_ai_categorization(tool_context: ToolContext, batch_size: int = 300, transaction_type: str | None = None) -> str:
+    """
+    Fetches a batch of individual uncategorized transactions for detailed, row-by-row AI processing.
+    Can be filtered by transaction type.
+    """
+    logger.info(f"Fetching batch for AI categorization. Batch size: {batch_size}, Type: {transaction_type or 'All'}")
+
+    # Start building the query
     fetch_sql = f"""
         SELECT
             transaction_id, description_cleaned, merchant_name_cleaned, amount,
@@ -762,14 +767,23 @@ def fetch_batch_for_ai_categorization(tool_context: ToolContext, batch_size: int
         FROM `{TABLE_ID}`
         WHERE (category_l1 IS NULL OR category_l2 IS NULL)
             AND category_l1 IS DISTINCT FROM 'Transfer'
-        LIMIT {batch_size};
     """
+
+    # Add the transaction_type filter if provided
+    if transaction_type:
+        # Use a parameter to prevent SQL injection, though in this controlled
+        # environment it's less of a risk. It's good practice.
+        fetch_sql += f" AND transaction_type = '{transaction_type}'"
+
+    # Add the limit
+    fetch_sql += f"\\nLIMIT {batch_size};"
+
     try:
         df = bq_client.query(fetch_sql).to_dataframe()
         if df.empty:
-            logger.info("✅ No more transactions found needing categorization. Signaling loop to stop.")
+            logger.info(f"✅ No more '{transaction_type or 'any'}' transactions found needing categorization. Signaling loop to stop.")
             tool_context.actions.escalate = True
-            return json.dumps({"status": "complete", "message": "No more transactions to process."})
+            return json.dumps({"status": "complete", "message": f"No more '{transaction_type or 'any'}' transactions to process."})
         logger.info(f"Fetched {len(df)} transactions for AI categorization.")
         return df.to_json(orient='records')
     except GoogleAPICallError as e:
