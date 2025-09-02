@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # --- Loop Agents for Batch Processing ---
 single_recurring_batch_agent = LlmAgent(
     name="single_recurring_batch_agent",
-    model="gemini-2.5-pro",
+    model="gemini-2.5-flash",
     tools=[get_recurring_candidates_batch, apply_bulk_recurring_flags],
     instruction="""
     Your purpose is to perform one cycle of BATCH recurring transaction identification.
