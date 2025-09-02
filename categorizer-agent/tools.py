@@ -41,7 +41,7 @@ def get_data_quality_report() -> str:
             "summary": "Breakdown of transactions missing one or both category labels."
         },
         "Mismatched Transaction Types": {
-            "query": f"SELECT transaction_type, category_l1, COUNT(transaction_id) AS transaction_count FROM `{TABLE_ID}` WHERE (category_l1 = 'Income' AND (transaction_type = 'Debit' OR amount < 0)) OR (category_l1 = 'Expense' AND (transaction_type = 'Credit' OR amount > 0)) GROUP BY 1, 2 ORDER BY transaction_count DESC;",
+            "query": f"SELECT transaction_id, transaction_type, category_l1, category_l2, merchan_name_cleaned, amount FROM `{TABLE_ID}` WHERE (category_l1 = 'Income' AND (transaction_type = 'Debit' OR amount < 0)) OR (category_l1 = 'Expense' AND (transaction_type = 'Credit' OR amount > 0)) GROUP BY 1, 2 ORDER BY transaction_count DESC;",
             "summary": "Highlights conflicts where transaction direction (Debit/Credit) contradicts the L1 category (Income/Expense)."
         },
         "Inconsistent Recurring Transactions": {
@@ -660,7 +660,7 @@ def apply_bulk_merchant_update(categorized_json_string: str) -> str:
         logger.error(f"❌ BigQuery error during bulk merchant update: {e}")
         return json.dumps({"status": "error", "message": str(e)})
 
-def get_uncategorized_patterns_batch(tool_context: ToolContext, batch_size: int = 20) -> str:
+def get_uncategorized_patterns_batch(tool_context: ToolContext, batch_size: int = 30) -> str:
     """Fetches a batch of the most frequent uncategorized transaction patterns for efficient bulk processing."""
     logger.info(f"Fetching batch of {batch_size} patterns for bulk categorization...")
     query = f"""

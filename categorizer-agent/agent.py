@@ -57,7 +57,7 @@ recurring_transaction_identification_workflow = LoopAgent(
 
 merchant_categorization_agent = LlmAgent(
     name="merchant_categorization_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     tools=[get_uncategorized_merchants_batch, apply_bulk_merchant_update],
     instruction=f"""
     Your purpose is to perform one cycle of BATCH merchant-based transaction categorization. You are an expert at analyzing transaction data and assigning precise categories.
@@ -100,7 +100,7 @@ merchant_categorization_workflow = LoopAgent(
 
 pattern_categorization_agent = LlmAgent(
     name="pattern_categorization_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     tools=[get_uncategorized_patterns_batch, apply_bulk_pattern_update],
     instruction=f"""
     You are a meticulous data analyst specializing in identifying and categorizing financial transaction patterns. Your purpose is to process one batch of transaction patterns accurately and efficiently.
@@ -153,7 +153,7 @@ pattern_categorization_workflow = LoopAgent(
 # transactions based on the initial prompt it receives from its parent controller.
 individual_transaction_categorizer_agent = LlmAgent(
     name="individual_transaction_categorizer_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     tools=[get_transaction_batch_for_ai_categorization, update_transactions_with_ai_categories],
     instruction=f"""
     You are an expert financial analyst. Your goal is to categorize a batch of transactions.
