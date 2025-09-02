@@ -11,7 +11,7 @@ from google.adk.tools import AgentTool
 from .config import VALID_CATEGORIES_JSON_STR, PROJECT_ID, DATASET_ID, TABLE_ID, RULES_TABLE_ID
 from .tools import (
     get_data_quality_report,
-    cleanse_transaction_data,
+    prepare_transaction_data,
     apply_rules_based_categorization,
     create_new_categorization_rule,
     harmonize_recurring_transaction_categories,
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # --- Loop Agents for Batch Processing ---
 recurring_transaction_identifier_agent = LlmAgent(
     name="recurring_transaction_identifier_agent",
-    model="gemini-1.5-flash",
+    model="gemini-2.5-flash",
     tools=[get_recurring_transaction_candidates, flag_recurring_transactions_in_bulk],
     instruction="""
     Your purpose is to perform one cycle of BATCH recurring transaction identification.
@@ -57,7 +57,7 @@ recurring_transaction_identification_workflow = LoopAgent(
 
 merchant_categorization_agent = LlmAgent(
     name="merchant_categorization_agent",
-    model="gemini-1.5-flash",
+    model="gemini-2.5-flash",
     tools=[get_uncategorized_merchants_batch, apply_bulk_merchant_update],
     instruction=f"""
     Your purpose is to perform one cycle of BATCH merchant-based transaction categorization. You are an expert at analyzing transaction data and assigning precise categories.
@@ -100,7 +100,7 @@ merchant_categorization_workflow = LoopAgent(
 
 pattern_categorization_agent = LlmAgent(
     name="pattern_categorization_agent",
-    model="gemini-1.5-flash",
+    model="gemini-2.5-flash",
     tools=[get_uncategorized_patterns_batch, apply_bulk_pattern_update],
     instruction=f"""
     You are a meticulous data analyst specializing in identifying and categorizing financial transaction patterns. Your purpose is to process one batch of transaction patterns accurately and efficiently.
@@ -153,7 +153,7 @@ pattern_categorization_workflow = LoopAgent(
 # transactions based on the initial prompt it receives from its parent controller.
 individual_transaction_categorizer_agent = LlmAgent(
     name="individual_transaction_categorizer_agent",
-    model="gemini-1.5-flash",
+    model="gemini-2.5-flash",
     tools=[get_transaction_batch_for_ai_categorization, update_transactions_with_ai_categories],
     instruction=f"""
     You are an expert financial analyst. Your goal is to categorize a batch of transactions.
@@ -182,7 +182,7 @@ individual_transaction_categorization_workflow = LoopAgent(
 # --- Controller Agent to Manage Credit/Debit Runs ---
 txn_categorization_controller = LlmAgent(
     name="txn_categorization_controller",
-    model="gemini-1.5-flash",
+    model="gemini-2.5-flash",
     tools=[AgentTool(agent=individual_transaction_categorization_workflow)],
     instruction="""
     You are a workflow orchestrator. Your sole responsibility is to categorize all remaining credit and debit transactions by running the `individual_transaction_categorization_workflow` agent in two distinct phases.
@@ -199,13 +199,13 @@ txn_categorization_controller = LlmAgent(
 # --- Root Orchestrator Agent ---
 financial_transaction_categorizer = Agent(
     name="financial_transaction_categorizer",
-    model="gemini-1.5-flash",
+    model="gemini-2.5-flash",
     tools=[
         get_data_quality_report,
         reset_all_transaction_categorizations,
         run_custom_query,
         review_and_resolve_rule_conflicts,
-        cleanse_transaction_data,
+        prepare_transaction_data,
         apply_rules_based_categorization,
         create_new_categorization_rule,
         harmonize_recurring_transaction_categories,
@@ -227,7 +227,7 @@ financial_transaction_categorizer = Agent(
         Please choose an option to begin:
 
         1.  📊 **Audit Data Quality**: Get a high-level overview and identify issues in your data.
-        2.  ⚙️ **Run Full Categorization**: Cleanse and categorize your data using rules and AI.
+        2.  ⚙️ **Run Full Categorization**: prepare and categorize your data using rules and AI.
         3.  🔁 **Analyze Recurring Transactions**: Identify recurring transactions like subscriptions and bills.
         4.  🔎 **Conduct Custom Research**: Analyze transactional data using natural language.
         5.  ➕ **Create Custom Rule**: Create a custom transaction categorizaton rule.
@@ -237,7 +237,7 @@ financial_transaction_categorizer = Agent(
         - If the user chooses **1 (Audit)**, call `get_data_quality_report` and present the results.
         - If the user chooses **2 (Run Full Categorization)**, you must execute the main categorization workflow. You MUST follow this order and report on the outcome of each step before proceeding to the next.
             - **Step 1: Rule Conflict Review:** Call `review_and_resolve_rule_conflicts`.
-            - **Step 2: Data Cleansing:** Call `cleanse_transaction_data`.
+            - **Step 2: Data Cleansing:** Call `prepare_transaction_data`.
             - **Step 3: Rules Application:** Call `apply_rules_based_categorization`.
             - **Step 4: AI Merchant Categorization:** Call the `merchant_categorization_workflow` agent.
             - **Step 5: AI Pattern Categorization:** Call the `pattern_categorization_workflow` agent.
