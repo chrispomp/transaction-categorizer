@@ -135,34 +135,27 @@ credit_transaction_categorizer_agent = LlmAgent(
     model="gemini-2.5-flash",
     tools=[fetch_batch_for_ai_categorization, update_categorizations_in_bigquery],
     instruction=f"""
-    Your purpose is to meticulously categorize a batch of CREDIT transactions. You are an expert financial transaction categorizer.
+    You are an expert financial transaction categorizer. Your task is to accurately categorize a batch of CREDIT transactions.
 
-    **Instructions:**
+    **Follow these steps:**
 
-    1.  **Fetch Credit Transactions:**
-        * Initiate the process by calling the `fetch_batch_for_ai_categorization` tool with the `transaction_type` set to 'Credit'.
+    1.  **Fetch Batch:** Call `fetch_batch_for_ai_categorization` with `transaction_type='Credit'`.
+    2.  **Analyze and Categorize:**
+        *   If the tool returns "complete" or an empty list, stop.
+        *   For each transaction, analyze the `description_cleaned` and `merchant_name_cleaned` to determine the correct `category_l1` and `category_l2`.
+        *   **CRITICAL:** You MUST use a valid category from this list: {VALID_CATEGORIES_JSON_STR}.
 
-    2.  **Process the Batch:**
-        * **Completion Check:** If the tool returns the string "complete", your task is finished. You MUST stop execution and escalate immediately.
-        * **Empty Batch Check:** If the tool returns an empty list of transactions, report that there were no transactions to process and stop.
-        * **Categorization:** For each transaction in the batch, analyze its details and assign a category.
-            * **CRITICAL:** You MUST use one of the following valid categories: {VALID_CATEGORIES_JSON_STR}. Do not use any other category.
+    **Categorization Guide:**
 
-    3.  **Update Records:**
-        * Once all transactions in the batch are categorized, call the `update_categorizations_in_bigquery` tool to save your work.
+    *   **Payroll:** Look for keywords like 'direct deposit', 'payroll', 'adp'.
+        *   *Example:* `description_cleaned: "direct deposit adp"` -> `category_l1: "Income", category_l2: "Payroll"`
+    *   **Refund:** Look for keywords like 'refund', 'return'.
+        *   *Example:* `description_cleaned: "refund from amazon"` -> `category_l1: "Income", category_l2: "Refund"`
+    *   **Gig Income:** Look for payments from gig economy platforms.
+        *   *Example:* `merchant_name_cleaned: "uber"` -> `category_l1: "Income", category_l2: "Gig Income"`
 
-    4.  **Report Summary:**
-        * The `update_categorizations_in_bigquery` tool will return a `summary`.
-        * Present this summary clearly and concisely in markdown format.
-        * **Example Report:**
-            ```markdown
-            ### Credit Transaction Batch Processed
-            * **Status:** ✅ Success
-            * **Transactions Processed:** 50
-            * **Category Breakdown:**
-                * Payroll: 20
-                * Refund: 30
-            ```
+    3.  **Update Records:** Call `update_categorizations_in_bigquery` with the categorized data.
+    4.  **Report Summary:** Present the `summary` from the update tool in a clear markdown format.
     """,
 )
 
@@ -180,34 +173,29 @@ debit_transaction_categorizer_agent = LlmAgent(
     model="gemini-2.5-flash",
     tools=[fetch_batch_for_ai_categorization, update_categorizations_in_bigquery],
     instruction=f"""
-    Your purpose is to meticulously categorize a batch of DEBIT transactions. You are an expert financial transaction categorizer.
+    You are an expert financial transaction categorizer. Your task is to accurately categorize a batch of DEBIT transactions.
 
-    **Instructions:**
+    **Follow these steps:**
 
-    1.  **Fetch Debit Transactions:**
-        * Initiate the process by calling the `fetch_batch_for_ai_categorization` tool with the `transaction_type` set to 'Debit'.
+    1.  **Fetch Batch:** Call `fetch_batch_for_ai_categorization` with `transaction_type='Debit'`.
+    2.  **Analyze and Categorize:**
+        *   If the tool returns "complete" or an empty list, stop.
+        *   For each transaction, analyze the `description_cleaned` and `merchant_name_cleaned` to determine the correct `category_l1` and `category_l2`.
+        *   **CRITICAL:** You MUST use a valid category from this list: {VALID_CATEGORIES_JSON_STR}.
 
-    2.  **Process the Batch:**
-        * **Completion Check:** If the tool returns the string "complete", your task is finished. You MUST stop execution and escalate immediately.
-        * **Empty Batch Check:** If the tool returns an empty list of transactions, report that there were no transactions to process and stop.
-        * **Categorization:** For each transaction in the batch, analyze its details and assign a category.
-            * **CRITICAL:** You MUST use one of the following valid categories: {VALID_CATEGORIES_JSON_STR}. Do not use any other category.
+    **Categorization Guide:**
 
-    3.  **Update Records:**
-        * Once all transactions in the batch are categorized, call the `update_categorizations_in_bigquery` tool to save your work.
+    *   **Shopping:** Look for merchants that are retail stores or online marketplaces.
+        *   *Example:* `merchant_name_cleaned: "amazon marketplace"` -> `category_l1: "Expense", category_l2: "Shopping"`
+    *   **Groceries:** Look for merchants that are supermarkets or grocery stores.
+        *   *Example:* `merchant_name_cleaned: "safeway"` -> `category_l1: "Expense", category_l2: "Groceries"`
+    *   **Food & Dining:** Look for restaurants, cafes, and food delivery services.
+        *   *Example:* `merchant_name_cleaned: "starbucks"` -> `category_l1: "Expense", category_l2: "Food & Dining"`
+    *   **Bills & Utilities:** Look for utility companies or bill payment services.
+        *   *Example:* `merchant_name_cleaned: "pg&e"` -> `category_l1: "Expense", category_l2: "Bills & Utilities"`
 
-    4.  **Report Summary:**
-        * The `update_categorizations_in_bigquery` tool will return a `summary`.
-        * Present this summary clearly and concisely in markdown format.
-        * **Example Report:**
-            ```markdown
-            ### Debit Transaction Batch Processed
-            * **Status:** ✅ Success
-            * **Transactions Processed:** 150
-            * **Category Breakdown:**
-                * Shopping: 75
-                * Groceries: 50
-            ```
+    3.  **Update Records:** Call `update_categorizations_in_bigquery` with the categorized data.
+    4.  **Report Summary:** Present the `summary` from the update tool in a clear markdown format.
     """,
 )
 
