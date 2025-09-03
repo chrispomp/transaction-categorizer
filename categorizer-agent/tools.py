@@ -204,7 +204,7 @@ def apply_rules_based_categorization() -> str:
                 r.category_l1,
                 r.category_l2,
                 r.is_recurring_rule,
-                r.rule_id, -- <-- FIX: Add the rule_id column here
+                r.rule_id, 
                 'rules-based-' || LOWER(r.rule_type) AS method,
                 -- Prioritize persona-specific rules over global rules
                 ROW_NUMBER() OVER(
@@ -478,7 +478,7 @@ def get_recurring_transaction_candidates(tool_context: ToolContext, batch_size: 
             ) AS example_transactions
         FROM TransactionIntervals
         GROUP BY 1, 2
-        HAVING COUNT(transaction_id) >= 3
+        HAVING COUNT(transaction_id) >= 6
         ORDER BY has_recurring_keywords DESC, transaction_count DESC
         LIMIT {batch_size};
     """

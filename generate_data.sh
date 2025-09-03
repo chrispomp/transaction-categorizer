@@ -36,7 +36,7 @@ TABLE_ID = "transactions"
 NUM_CONSUMERS_TO_GENERATE = 5
 MIN_VARIABLE_TRANSACTIONS_PER_MONTH = 35
 MAX_VARIABLE_TRANSACTIONS_PER_MONTH = 45
-TRANSACTION_HISTORY_MONTHS = 12
+TRANSACTION_HISTORY_MONTHS = 36
 CONCURRENT_CONSUMER_JOBS = 10
 
 # --- Setup Logging ---
@@ -259,7 +259,7 @@ try:
     if not PROJECT_ID or "your-gcp-project-id" in PROJECT_ID:
         raise ValueError("PROJECT_ID is not set correctly.")
     vertexai.init(project=PROJECT_ID, location=LOCATION)
-    model = GenerativeModel("gemini-2.5-flash")
+    model = GenerativeModel("gemini-2.5-flash-lite")
     bq_client = bigquery.Client(project=PROJECT_ID)
     logging.info(f"Initialized Vertex AI and BigQuery for project '{PROJECT_ID}'")
 except Exception as e:
@@ -272,7 +272,7 @@ TRANSACTIONS_SCHEMA = [
     bigquery.SchemaField("consumer_name", "STRING", mode="NULLABLE", description="The first and last name of the synthetic consumer."),
     bigquery.SchemaField("persona_type", "STRING", mode="NULLABLE", description="The generated persona profile for the consumer (e.g., 'Freelance Creative')."),
     bigquery.SchemaField("institution_name", "STRING", mode="NULLABLE", description="The name of the financial institution (e.g., 'Chase')."),
-    bigquery.SchemaField("account_type", "STRING", mode="NULLABLE", description="The type of account (e.g., 'Checking Account', 'Credit Card')."),
+    bigquery.SchemaField("account_type", "STRING", mode="NULLABLE", "The type of account (e.g., 'Checking Account', 'Credit Card')."),
     bigquery.SchemaField("transaction_date", "TIMESTAMP", mode="NULLABLE", description="The exact date and time the transaction was posted."),
     bigquery.SchemaField("transaction_type", "STRING", mode="NULLABLE", description="The type of transaction, either 'Debit' or 'Credit'."),
     bigquery.SchemaField("amount", "FLOAT", mode="NULLABLE", description="The value of the transaction. Negative for debits, positive for credits."),
@@ -280,12 +280,13 @@ TRANSACTIONS_SCHEMA = [
     bigquery.SchemaField("description_raw", "STRING", mode="NULLABLE", description="The original, unaltered transaction description from the bank statement."),
     bigquery.SchemaField("description_cleaned", "STRING", mode="NULLABLE", description="A standardized and cleaned version of the raw description (lowercase, no special characters)."),
     bigquery.SchemaField("merchant_name_raw", "STRING", mode="NULLABLE", description="The raw, potentially messy merchant name as it might appear on a statement."),
-    bigquery.SchemaField("merchant_name_cleaned", "STRING", mode="NULLABLE", description="The cleaned, canonical name of the merchant for analytics."),
+    bigquery.SchemaField("merchant_name_cleaned", "STRING", mode="NULLABLE", "The cleaned, canonical name of the merchant for analytics."),
     bigquery.SchemaField("category_l1", "STRING", mode="NULLABLE", description="The high-level category: 'Income', 'Expense', or 'Transfer'."),
     bigquery.SchemaField("category_l2", "STRING", mode="NULLABLE", description="The detailed sub-category (e.g., 'Groceries', 'Software & Tech', 'Interest Income')."),
     bigquery.SchemaField("channel", "STRING", mode="NULLABLE", description="The method or channel of the transaction (e.g., 'Point-of-Sale', 'ACH')."),
     bigquery.SchemaField("categorization_update_timestamp", "TIMESTAMP", mode="NULLABLE", description="The timestamp when the transaction's categorization was last updated."),
-    bigquery.SchemaField("categorization_method", "STRING", mode="NULLABLE", description="The method for which the transaction's categorization was updated.")
+    bigquery.SchemaField("categorization_method", "STRING", mode="NULLABLE", description="The method for which the transaction's categorization was updated."),
+    bigquery.SchemaField("rule_id", "STRING", mode="NULLABLE", description="Unique identifier for the rule.")
 ]
 
 @retry_async.AsyncRetry(predicate=retry_async.if_exception_type(exceptions.Aborted, exceptions.DeadlineExceeded, exceptions.ServiceUnavailable, exceptions.TooManyRequests), initial=1.0, maximum=16.0, multiplier=2.0)

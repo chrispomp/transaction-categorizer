@@ -75,7 +75,7 @@ merchant_categorization_agent = LlmAgent(
     - **`category_l1`: "Income"**
         - `category_l2`: "Gig Income", "Payroll", "Other Income", "Refund", "Interest Income"
     - **`category_l1`: "Expense"**
-        - `category_l2`: "Groceries", "Pharmacy", "Office Supplies", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
+        - `category_l2`: "Groceries", "Pharmacy", "Office Supplies", "Food & Dining", "Coffee Shop", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
     - **`category_l1`: "Transfer"**
         - `category_l2`: "Credit Card Payment", "Internal Transfer", "ATM Withdrawal"
 
@@ -117,7 +117,7 @@ pattern_categorization_agent = LlmAgent(
     - **`category_l1`: "Income"**
         - `category_l2`: "Gig Income", "Payroll", "Other Income", "Refund", "Interest Income"
     - **`category_l1`: "Expense"**
-        - `category_l2`: "Groceries", "Pharmacy", "Office Supplies", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
+        - `category_l2`: "Groceries", "Pharmacy", "Office Supplies", "Food & Dining", "Coffee Shop", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
     - **`category_l1`: "Transfer"**
         - `category_l2`: "Credit Card Payment", "Internal Transfer", "ATM Withdrawal"
 
@@ -161,7 +161,7 @@ individual_transaction_categorizer_agent = LlmAgent(
     - **`category_l1`: "Income"** (`transaction_type` MUST be 'Credit')
         - `category_l2`: "Gig Income", "Payroll", "Other Income", "Refund", "Interest Income"
     - **`category_l1`: "Expense"** (`transaction_type` MUST be 'Debit')
-        - `category_l2`: "Groceries", "Pharmacy", "Office Supplies", "Food & Dining", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
+        - `category_l2`: "Groceries", "Pharmacy", "Office Supplies", "Food & Dining", "Coffee Shop", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
     - **`category_l1`: "Transfer"**
         - `category_l2`: "Credit Card Payment", "Internal Transfer", "ATM Withdrawal"
 
