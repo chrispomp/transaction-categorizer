@@ -288,6 +288,8 @@ financial_transaction_categorizer = Agent(
             - `is_recurring` (BOOL): Flag for recurring transactions.
             - `channel` (STRING): The source channel (e.g., 'Online', 'In-store').
             - `categorization_method` (STRING): The method for which the transaction has been categorized.
+            - `rule_id` (STRING): Unique identifier for the rule.
+
 
         - **`{RULES_TABLE_ID}` (categorization_rules)**: Stores rules for categorization.
           - **Key Columns**:

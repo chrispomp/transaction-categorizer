@@ -28,26 +28,6 @@ logger = logging.getLogger(__name__)
 
 # --- 3. Tool Definitions ---
 
-def add_persona_to_rules_table() -> str:
-    """
-    Utility tool to add the 'persona_type' column to the categorization_rules table.
-    This is intended to be run once to update the schema.
-    """
-    logger.info("Attempting to add 'persona_type' column to the rules table...")
-    try:
-        add_column_query = f"ALTER TABLE `{RULES_TABLE_ID}` ADD COLUMN persona_type STRING;"
-        bq_client.query(add_column_query).result()
-        logger.info("Successfully added 'persona_type' column to the rules table.")
-        return "✅ **Schema Update Successful**: The 'persona_type' column has been added to the rules table."
-    except GoogleAPICallError as e:
-        error_str = str(e).lower()
-        if ("duplicate column name" in error_str or "already exists" in error_str) and "persona_type" in error_str:
-            logger.info("'persona_type' column already exists. No action needed.")
-            return "✅ **Schema Update Not Needed**: The 'persona_type' column already exists."
-        else:
-            logger.error(f"Error adding 'persona_type' column: {e}")
-            return f"❌ **Schema Update Failed**: An error occurred while adding the 'persona_type' column. Error: {e}"
-
 # --- Report, Reset, & Custom Query Tools ---
 def get_data_quality_report() -> str:
     """
@@ -252,6 +232,7 @@ def apply_rules_based_categorization() -> str:
         UPDATE SET
             T.category_l1 = U.category_l1,
             T.category_l2 = U.category_l2,
+            T.rule_id = U.rule_id,
             T.is_recurring = COALESCE(U.is_recurring_rule, T.is_recurring),
             T.categorization_method = U.method,
             T.categorization_update_timestamp = CURRENT_TIMESTAMP();
