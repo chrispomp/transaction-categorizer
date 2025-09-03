@@ -285,7 +285,7 @@ financial_transaction_categorizer = Agent(
             - `category_l1` (STRING): The top-level category (e.g., 'Expense', 'Income').
             - `category_l2` (STRING): The sub-category (e.g., 'Groceries', 'Shopping').
             - `is_recurring` (BOOL): Flag for recurring transactions.
-            - `channel` (STRING): The source channel (e.g., 'Online', 'In-store').
+            - `channel` (STRING): The source channel (e.g., 'ACH', 'Point-of-Sale').
             - `categorization_method` (STRING): The method for which the transaction has been categorized.
             - `rule_id` (STRING): Unique identifier for the rule.
 
