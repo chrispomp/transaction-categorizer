@@ -222,7 +222,6 @@ financial_transaction_categorizer = Agent(
         AgentTool(agent=recurring_transaction_identification_workflow),
         AgentTool(agent=merchant_categorization_workflow),
         AgentTool(agent=pattern_categorization_workflow),
-        # OPTIMIZATION: The root agent now calls the controller, not the loop directly.
         AgentTool(agent=txn_categorization_controller),
     ],
     instruction=f"""

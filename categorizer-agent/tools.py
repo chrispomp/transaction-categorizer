@@ -94,7 +94,7 @@ def reset_all_transaction_categorizations(confirm: bool = False) -> str:
         logger.warning("Reset requested without confirmation. Awaiting user confirmation.")
         return "⚠️ **Confirmation Required**\n\nThis is a destructive action that will clear ALL categorization and cleansing data (categories, cleaned descriptions, etc.). This action **cannot be undone**.\n\nPlease confirm you want to proceed by replying with 'yes' or 'proceed'."
     logger.info("Confirmation received. Proceeding with full data reset.")
-    reset_sql = f"UPDATE `{TABLE_ID}` SET category_l1 = NULL, category_l2 = NULL, description_cleaned = NULL, merchant_name_cleaned = NULL, is_recurring = NULL, categorization_method = NULL, categorization_update_timestamp = NULL WHERE TRUE;"
+    reset_sql = f"UPDATE `{TABLE_ID}` SET category_l1 = NULL, category_l2 = NULL, description_cleaned = NULL, merchant_name_cleaned = NULL, is_recurring = NULL, rule_id = NULL, categorization_method = NULL, categorization_update_timestamp = NULL WHERE TRUE;"
     try:
         query_job = bq_client.query(reset_sql)
         query_job.result()
@@ -204,6 +204,7 @@ def apply_rules_based_categorization() -> str:
                 r.category_l1,
                 r.category_l2,
                 r.is_recurring_rule,
+                r.rule_id, -- <-- FIX: Add the rule_id column here
                 'rules-based-' || LOWER(r.rule_type) AS method,
                 -- Prioritize persona-specific rules over global rules
                 ROW_NUMBER() OVER(
