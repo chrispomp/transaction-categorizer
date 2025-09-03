@@ -52,7 +52,7 @@ recurring_transaction_identification_workflow = LoopAgent(
     name="recurring_transaction_identification_workflow",
     description="This agent starts an AI-driven process to find and flag recurring transactions. It processes merchants in batches and provides real-time summaries.",
     sub_agents=[recurring_transaction_identifier_agent],
-    max_iterations=20
+    max_iterations=50
 )
 
 merchant_categorization_agent = LlmAgent(
@@ -60,7 +60,7 @@ merchant_categorization_agent = LlmAgent(
     model="gemini-2.5-flash",
     tools=[get_uncategorized_merchants_batch, apply_bulk_merchant_update],
     instruction=f"""
-    You are a highly efficient financial analyst AI. Your sole purpose is to categorize merchants in batches with extreme accuracy. You must follow these rules precisely.
+    You are a highly efficient financial analyst AI. Your sole purpose is to categorize merchants in batches with extreme accuracy to maximize the number of transactions categorized in bulk.
 
     **Primary Directive:** For each merchant in the batch, you must assign a `category_l1` and `category_l2`.
 
@@ -72,12 +72,7 @@ merchant_categorization_agent = LlmAgent(
     3.  **Required Fields:** Each item in your JSON output **MUST** include `merchant_name_cleaned`, `transaction_type`, `persona_type`, `category_l1`, and `category_l2`.
 
     **VALID CATEGORIES:**
-    - **`category_l1`: "Income"**
-        - `category_l2`: "Gig Income", "Payroll", "Other Income", "Refund", "Interest Income"
-    - **`category_l1`: "Expense"**
-        - `category_l2`: "Groceries", "Pharmacy", "Office Supplies", "Food & Dining", "Coffee Shop", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
-    - **`category_l1`: "Transfer"**
-        - `category_l2`: "Credit Card Payment", "Internal Transfer", "ATM Withdrawal"
+    {VALID_CATEGORIES_JSON_STR}
 
     **WORKFLOW:**
     1.  **FETCH BATCH**: Call `get_uncategorized_merchants_batch`. If the tool response indicates it is complete, you MUST stop and escalate.
@@ -94,7 +89,7 @@ merchant_categorization_workflow = LoopAgent(
     name="merchant_categorization_workflow",
     description="This agent starts an efficient, automated categorization by processing BATCHES of common uncategorized merchants, providing a summary for each batch.",
     sub_agents=[merchant_categorization_agent],
-    max_iterations=20
+    max_iterations=50
 )
 
 pattern_categorization_agent = LlmAgent(
@@ -114,12 +109,7 @@ pattern_categorization_agent = LlmAgent(
     3.  **Required Fields:** Each item in your JSON output **MUST** include `description_prefix`, `transaction_type`, `channel`, `persona_type`, `category_l1`, and `category_l2`.
 
     **VALID CATEGORIES:**
-    - **`category_l1`: "Income"**
-        - `category_l2`: "Gig Income", "Payroll", "Other Income", "Refund", "Interest Income"
-    - **`category_l1`: "Expense"**
-        - `category_l2`: "Groceries", "Pharmacy", "Office Supplies", "Food & Dining", "Coffee Shop", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
-    - **`category_l1`: "Transfer"**
-        - `category_l2`: "Credit Card Payment", "Internal Transfer", "ATM Withdrawal"
+    {VALID_CATEGORIES_JSON_STR}
 
     **WORKFLOW:**
     1.  **FETCH BATCH**: Call `get_uncategorized_patterns_batch`. If the tool response indicates completion, you must stop and escalate.
@@ -136,7 +126,7 @@ pattern_categorization_workflow = LoopAgent(
     name="pattern_categorization_workflow",
     description="This agent starts an advanced, batch-based categorization on common transaction description patterns, providing real-time summaries.",
     sub_agents=[pattern_categorization_agent],
-    max_iterations=20
+    max_iterations=50
 )
 
 # --- Transaction Categorizer Agent ---
@@ -148,30 +138,24 @@ individual_transaction_categorizer_agent = LlmAgent(
     instruction=f"""
     You are an expert financial analyst AI. Your goal is to categorize a batch of individual transactions with perfect accuracy by following a strict set of rules.
 
-    **Primary Directive:** Based on the initial prompt, you will process either 'Credit' or 'Debit' transactions. For each transaction, you must assign a valid `category_l1` and `category_l2`.
+    **Primary Directive:** For each transaction, you must assign a valid `category_l1` and `category_l2`.
 
     **LOGICAL RULES (NON-NEGOTIABLE):**
     1.  **Transaction Type Constraint:**
-        - If processing 'Debit' transactions, `category_l1` **CANNOT** be 'Income'.
-        - If processing 'Credit' transactions, `category_l1` **MUST** be 'Income' or 'Transfer'. It **CANNOT** be 'Expense'.
+        - If `transaction_type` is 'Debit', `category_l1` **CANNOT** be 'Income'.
+        - If `transaction_type` is 'Credit', `category_l1` **MUST** be 'Income' or 'Transfer'. It **CANNOT** be 'Expense'.
     2.  **Valid Category Structure:** You **MUST** use the exact `category_l1` and `category_l2` pairs from the list below. Do not invent, create, or use any category not explicitly provided.
 
     **VALID CATEGORIES:**
-    - **`category_l1`: "Income"** (`transaction_type` MUST be 'Credit')
-        - `category_l2`: "Gig Income", "Payroll", "Other Income", "Refund", "Interest Income"
-    - **`category_l1`: "Expense"** (`transaction_type` MUST be 'Debit')
-        - `category_l2`: "Groceries", "Pharmacy", "Office Supplies", "Food & Dining", "Coffee Shop", "Shopping", "Entertainment", "Health & Wellness", "Auto & Transport", "Travel & Vacation", "Software & Tech", "Medical", "Insurance", "Bills & Utilities", "Fees & Charges", "Business Services", "Other Expense", "Loan Payment"
-    - **`category_l1`: "Transfer"**
-        - `category_l2`: "Credit Card Payment", "Internal Transfer", "ATM Withdrawal"
+    {VALID_CATEGORIES_JSON_STR}
 
     **WORKFLOW:**
     1.  **Fetch Batch:** Call `get_transaction_batch_for_ai_categorization` without a `transaction_type` to get all uncategorized transactions.
-    2.  **Fetch Batch:** Call `get_transaction_batch_for_ai_categorization`, passing the correct `transaction_type`.
-    3.  **Analyze & Categorize:**
+    2.  **Analyze & Categorize:**
         - If the tool returns "complete", escalate immediately.
         - For each transaction, apply the **LOGICAL RULES** and **VALID CATEGORIES**. Use `persona_type` for context (e.g., 'UBER' income for a 'Full-Time Rideshare Driver' is 'Gig Income').
-    4.  **Update Batch:** Call `update_transactions_with_ai_categories` **once** with all categorizations for the batch.
-    5.  **Report Summary:** Use the `summary` to create a data-driven markdown report.
+    3.  **Update Batch:** Call `update_transactions_with_ai_categories` **once** with all categorizations for the batch.
+    4.  **Report Summary:** Use the `summary` to create a data-driven markdown report.
         - **Example:** '**Transaction Batch Processed**\n\nSuccessfully categorized **150** debit transactions. Top categories assigned:\n- Shopping: 45 transactions\n- Food & Dining: 32 transactions'
     """,
 )
@@ -183,7 +167,7 @@ individual_transaction_categorization_workflow = LoopAgent(
     name="individual_transaction_categorization_workflow",
     description="This is a worker agent that processes batches of transactions of a specific type (credit or debit).",
     sub_agents=[individual_transaction_categorizer_agent],
-    max_iterations=20 # High iteration count to process all transactions of a given type.
+    max_iterations=50
 )
 
 # --- Controller Agent to Manage Credit/Debit Runs ---
@@ -242,9 +226,9 @@ financial_transaction_categorizer = Agent(
             - **Step 1: Rule Conflict Review:** Call `review_and_resolve_rule_conflicts`.
             - **Step 2: Data Cleansing:** Call `prepare_transaction_data`.
             - **Step 3: Rules Application:** Call `apply_rules_based_categorization`.
-            - **Step 4: AI Merchant Categorization:** Call the `merchant_categorization_workflow` agent.
-            - **Step 5: AI Pattern Categorization:** Call the `pattern_categorization_workflow` agent.
-            - **Step 6: AI Transaction-Level Categorization:** Call the `txn_categorization_controller` agent. This controller will manage the final categorization, processing all credits first, then all debits.
+            - **Step 4: AI Merchant Categorization:** Call the `merchant_categorization_workflow` agent to categorize as many transactions as possible by merchant.
+            - **Step 5: AI Pattern Categorization:** Call the `pattern_categorization_workflow` agent to categorize as many transactions as possible by pattern.
+            - **Step 6: AI Transaction-Level Categorization:** Call the `txn_categorization_controller` agent. This controller will manage the final categorization for any remaining transactions.
             - **Step 7: Learn New Rules:** Call `learn_new_categorization_rules` to learn from the AI's work.
             - **Step 8: Apply Fallback Categories:** Call `apply_fallback_categorization` to ensure all transactions are categorized.
             - After the final step, provide a concluding summary.

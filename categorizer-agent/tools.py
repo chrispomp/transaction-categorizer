@@ -552,7 +552,7 @@ def flag_recurring_transactions_in_bulk(categorized_json_string: str) -> str:
         logger.error(f"❌ BigQuery error during bulk recurring flag update: {e}")
         return json.dumps({"status": "error", "message": str(e)})
 
-def get_uncategorized_merchants_batch(tool_context: ToolContext, batch_size: int = 50) -> str:
+def get_uncategorized_merchants_batch(tool_context: ToolContext, batch_size: int = 200) -> str:
     """
     Fetches a batch of the most frequent uncategorized merchants for efficient bulk processing.
     """
@@ -645,7 +645,7 @@ def apply_bulk_merchant_update(categorized_json_string: str) -> str:
         logger.error(f"❌ BigQuery error during bulk merchant update: {e}")
         return json.dumps({"status": "error", "message": str(e)})
 
-def get_uncategorized_patterns_batch(tool_context: ToolContext, batch_size: int = 50) -> str:
+def get_uncategorized_patterns_batch(tool_context: ToolContext, batch_size: int = 200) -> str:
     """Fetches a batch of the most frequent uncategorized transaction patterns for efficient bulk processing."""
     logger.info(f"Fetching batch of {batch_size} patterns for bulk categorization...")
     query = f"""
@@ -834,14 +834,14 @@ def update_transactions_with_ai_categories(categorized_json_string: str) -> str:
 
 def _calculate_confidence_score(transaction_count: int) -> int:
     """Calculates a confidence score on a 1-100 scale based on the transaction count."""
-    if transaction_count >= 10:
-        return 80 + min(14, (transaction_count - 10)) # High confidence: 80-94
+    if transaction_count >= 15:
+        return 80 + min(14, (transaction_count - 15)) # High confidence: 80-94
+    elif transaction_count >= 5:
+        return 60 + (transaction_count - 5) * 4 # Medium confidence: 60-76
     elif transaction_count >= 3:
-        return 60 + (transaction_count - 3) * 3 # Medium confidence: 60-78
-    elif transaction_count == 2:
-        return 50 # New tier for 2 transactions
+        return 50 # Low confidence
     else:
-        return 0 # Low confidence, should not be used to create rules
+        return 0 # No confidence, do not create a rule
 
 def learn_new_categorization_rules() -> str:
     """
@@ -862,10 +862,10 @@ def learn_new_categorization_rules() -> str:
         LOGICAL_AND(IFNULL(is_recurring, FALSE)) AS is_recurring_rule,
         COUNT(transaction_id) AS transaction_count
     FROM `{TABLE_ID}`
-    WHERE categorization_method IN ('llm-bulk-merchant-based', 'llm-transaction-based')
+    WHERE categorization_method IN ('llm-bulk-merchant-based')
         AND merchant_name_cleaned IS NOT NULL AND merchant_name_cleaned != ''
     GROUP BY 1, 2, 3, 4, 5
-    HAVING COUNT(transaction_id) >= 2;
+    HAVING COUNT(transaction_id) >= 3;
     """
     try:
         new_merchant_rules_df = bq_client.query(get_merchants_sql).to_dataframe()
@@ -918,7 +918,7 @@ def learn_new_categorization_rules() -> str:
             LOGICAL_AND(IFNULL(is_recurring, FALSE)) AS is_recurring_rule,
             COUNT(transaction_id) AS transaction_count
         FROM `{TABLE_ID}`
-        WHERE categorization_method IN ('llm-bulk-pattern-based', 'llm-transaction-based')
+        WHERE categorization_method IN ('llm-bulk-pattern-based')
             AND description_cleaned IS NOT NULL AND description_cleaned != ''
         GROUP BY 1, 2, 3, 4, 5
         HAVING COUNT(transaction_id) >= 3;
