@@ -478,7 +478,7 @@ def get_recurring_transaction_candidates(tool_context: ToolContext, batch_size: 
             ) AS example_transactions
         FROM TransactionIntervals
         GROUP BY 1, 2
-        HAVING COUNT(transaction_id) >= 6
+        HAVING COUNT(transaction_id) >= 5
         ORDER BY has_recurring_keywords DESC, transaction_count DESC
         LIMIT {batch_size};
     """
@@ -754,7 +754,7 @@ def get_transaction_batch_for_ai_categorization(tool_context: ToolContext, batch
     fetch_sql = f"""
         SELECT
             transaction_id, description_cleaned, merchant_name_cleaned, amount,
-            transaction_type, persona_type, channel, account_type, institution_name
+            transaction_type, persona_type, channel, account_type
         FROM `{TABLE_ID}`
         WHERE (category_l1 IS NULL OR category_l2 IS NULL)
             AND category_l1 IS DISTINCT FROM 'Transfer'
@@ -838,6 +838,8 @@ def _calculate_confidence_score(transaction_count: int) -> int:
         return 80 + min(14, (transaction_count - 10)) # High confidence: 80-94
     elif transaction_count >= 3:
         return 60 + (transaction_count - 3) * 3 # Medium confidence: 60-78
+    elif transaction_count == 2:
+        return 50 # New tier for 2 transactions
     else:
         return 0 # Low confidence, should not be used to create rules
 
@@ -863,7 +865,7 @@ def learn_new_categorization_rules() -> str:
     WHERE categorization_method IN ('llm-bulk-merchant-based', 'llm-transaction-based')
         AND merchant_name_cleaned IS NOT NULL AND merchant_name_cleaned != ''
     GROUP BY 1, 2, 3, 4, 5
-    HAVING COUNT(transaction_id) >= 3;
+    HAVING COUNT(transaction_id) >= 2;
     """
     try:
         new_merchant_rules_df = bq_client.query(get_merchants_sql).to_dataframe()
@@ -906,14 +908,67 @@ def learn_new_categorization_rules() -> str:
         return f"❌ **Error During Learning**: An error occurred while harvesting merchant rules. Error: {e}"
 
     # --- Part 2: Harvest Pattern rules ---
-    # (Similar logic as for merchants)
+        get_patterns_sql = f"""
+        SELECT
+            SUBSTR(description_cleaned, 1, 40) AS identifier,
+            transaction_type,
+            persona_type,
+            category_l1,
+            category_l2,
+            LOGICAL_AND(IFNULL(is_recurring, FALSE)) AS is_recurring_rule,
+            COUNT(transaction_id) AS transaction_count
+        FROM `{TABLE_ID}`
+        WHERE categorization_method IN ('llm-bulk-pattern-based', 'llm-transaction-based')
+            AND description_cleaned IS NOT NULL AND description_cleaned != ''
+        GROUP BY 1, 2, 3, 4, 5
+        HAVING COUNT(transaction_id) >= 3;
+        """
+        try:
+            new_pattern_rules_df = bq_client.query(get_patterns_sql).to_dataframe()
+            if not new_pattern_rules_df.empty:
+                new_pattern_rules_df['confidence_score'] = new_pattern_rules_df['transaction_count'].apply(_calculate_confidence_score)
+                
+                # Load to temp table
+                job_config = bigquery.LoadJobConfig(write_disposition="WRITE_TRUNCATE")
+                bq_client.load_table_from_dataframe(new_pattern_rules_df, TEMP_TABLE_ID, job_config=job_config).result()
 
-    if total_affected_rows > 0:
-        logger.info("✅ Successfully harvested %d new or updated rules.", total_affected_rows)
-        return f"🧠 **Learning Complete**: Analyzed AI categorizations and created or updated **{total_affected_rows}** new high-confidence rules."
-    else:
-        logger.info("No new high-confidence rules to harvest.")
-        return "🧠 **Learning Complete**: No new patterns met the confidence threshold to be saved as rules."
+                # Merge into rules table
+                merge_patterns_sql = f"""
+                MERGE `{RULES_TABLE_ID}` R
+                USING `{TEMP_TABLE_ID}` NewRules
+                ON R.identifier = NewRules.identifier
+                    AND R.rule_type = 'pattern'
+                    AND R.transaction_type = NewRules.transaction_type
+                    AND IFNULL(R.persona_type, 'none') = IFNULL(NewRules.persona_type, 'none')
+                WHEN MATCHED AND NewRules.confidence_score > R.confidence_score THEN
+                    UPDATE SET
+                        category_l1 = NewRules.category_l1,
+                        category_l2 = NewRules.category_l2,
+                        is_recurring_rule = NewRules.is_recurring_rule,
+                        confidence_score = NewRules.confidence_score,
+                        last_updated_timestamp = CURRENT_TIMESTAMP()
+                WHEN NOT MATCHED THEN
+                    INSERT (rule_id, rule_type, identifier, transaction_type, persona_type, category_l1, category_l2, is_recurring_rule, confidence_score, created_timestamp, last_updated_timestamp, is_active)
+                    VALUES (
+                        GENERATE_UUID(), 'pattern', NewRules.identifier, NewRules.transaction_type,
+                        NewRules.persona_type, NewRules.category_l1, NewRules.category_l2,
+                        NewRules.is_recurring_rule, NewRules.confidence_score,
+                        CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP(), TRUE
+                    );
+                """
+                pattern_job = bq_client.query(merge_patterns_sql)
+                pattern_job.result()
+                total_affected_rows += pattern_job.num_dml_affected_rows or 0
+        except (GoogleAPICallError, Exception) as e:
+            logger.error(f"❌ Error harvesting pattern rules: {e}")
+            return f"❌ **Error During Learning**: An error occurred while harvesting pattern rules. Error: {e}"
+
+        if total_affected_rows > 0:
+            logger.info("✅ Successfully harvested %d new or updated rules.", total_affected_rows)
+            return f"🧠 **Learning Complete**: Analyzed AI categorizations and created or updated **{total_affected_rows}** new high-confidence rules."
+        else:
+            logger.info("No new high-confidence rules to harvest.")
+            return "🧠 **Learning Complete**: No new patterns met the confidence threshold to be saved as rules."
 
 def create_new_categorization_rule(
     identifier: str,

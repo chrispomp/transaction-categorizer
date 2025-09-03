@@ -166,7 +166,7 @@ individual_transaction_categorizer_agent = LlmAgent(
         - `category_l2`: "Credit Card Payment", "Internal Transfer", "ATM Withdrawal"
 
     **WORKFLOW:**
-    1.  **Determine Transaction Type:** The initial prompt will specify either 'Credit' or 'Debit'. This is your context.
+    1.  **Fetch Batch:** Call `get_transaction_batch_for_ai_categorization` without a `transaction_type` to get all uncategorized transactions.
     2.  **Fetch Batch:** Call `get_transaction_batch_for_ai_categorization`, passing the correct `transaction_type`.
     3.  **Analyze & Categorize:**
         - If the tool returns "complete", escalate immediately.
@@ -193,14 +193,11 @@ txn_categorization_controller = LlmAgent(
     model="gemini-2.5-flash",
     tools=[AgentTool(agent=individual_transaction_categorization_workflow)],
     instruction="""
-    You are a workflow orchestrator. Your sole responsibility is to categorize all remaining credit and debit transactions by running the `individual_transaction_categorization_workflow` agent in two distinct phases.
+    You are a workflow orchestrator. Your sole responsibility is to categorize all remaining transactions by running the `individual_transaction_categorization_workflow` agent.
 
-    **You MUST follow these steps in this exact order:**
+    You MUST call the tool with the following input: "Process all transactions."
 
-    1.  **Credit Phase:** First, you MUST call the `individual_transaction_categorization_workflow` tool with the following input: "Process all credit transactions."
-    2.  **Debit Phase:** After the first tool call is fully complete, you MUST call the `individual_transaction_categorization_workflow` tool a second time with the following input: "Process all debit transactions."
-
-    Do not stop until both phases are complete. Report back a simple confirmation message when the entire process is finished.
+    Report back a simple confirmation message when the entire process is finished.
     """
 )
 
