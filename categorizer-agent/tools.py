@@ -257,7 +257,8 @@ def apply_rules_based_categorization() -> str:
             JOIN `{RULES_TABLE_ID}` r
                 ON (
                     (r.rule_type = 'merchant' AND t.merchant_name_cleaned = r.identifier) OR
-                    (r.rule_type = 'pattern' AND STRPOS(t.description_cleaned, r.identifier) > 0)
+                    (r.rule_type = 'pattern' AND STRPOS(t.description_cleaned, r.identifier) > 0) OR
+                    (r.rule_type = 'transaction' AND t.description_cleaned = r.identifier)
                 )
                 AND (t.persona_type = r.persona_type OR r.persona_type IS NULL) -- Match persona or global
                 AND t.transaction_type = r.transaction_type
@@ -879,7 +880,7 @@ def learn_new_categorization_rules() -> str:
     WHERE categorization_method = 'llm-bulk-merchant-based'
         AND merchant_name_cleaned IS NOT NULL AND merchant_name_cleaned != ''
     GROUP BY 1, 2, 3, 4, 5
-    HAVING COUNT(transaction_id) >= 3
+    HAVING COUNT(transaction_id) >= 2
     """
     try:
         new_merchant_rules_df = bq_client.query(get_merchants_sql).to_dataframe()
@@ -977,8 +978,53 @@ def learn_new_categorization_rules() -> str:
             logger.error(f"❌ Error harvesting pattern rules: {e}")
             return f"❌ **Error During Learning**: An error occurred while harvesting pattern rules. Error: {e}"
 
-    # --- Part 3: Harvest rules from HIGH-CONFIDENCE single transactions ---
-    get_single_tx_rules_sql = f"""
+    # --- Part 3: Harvest 'transaction' rules from HIGH-CONFIDENCE single transactions ---
+    get_single_tx_desc_rules_sql = f"""
+    SELECT
+        description_cleaned AS identifier,
+        transaction_type,
+        persona_type,
+        category_l1,
+        category_l2,
+        is_recurring AS is_recurring_rule,
+        1 AS transaction_count,
+        95 AS confidence_score
+    FROM `{TABLE_ID}`
+    WHERE categorization_method = 'llm-transaction-based'
+      AND llm_confidence_score >= 9
+      AND description_cleaned IS NOT NULL AND description_cleaned != ''
+    """
+    try:
+        new_single_tx_desc_rules_df = bq_client.query(get_single_tx_desc_rules_sql).to_dataframe()
+        if not new_single_tx_desc_rules_df.empty:
+            job_config = bigquery.LoadJobConfig(write_disposition="WRITE_TRUNCATE")
+            bq_client.load_table_from_dataframe(new_single_tx_desc_rules_df, TEMP_TABLE_ID, job_config=job_config).result()
+
+            merge_single_tx_desc_sql = f"""
+            MERGE `{RULES_TABLE_ID}` R
+            USING `{TEMP_TABLE_ID}` NewRules
+            ON R.identifier = NewRules.identifier
+                AND R.rule_type = 'transaction'
+                AND R.transaction_type = NewRules.transaction_type
+                AND IFNULL(R.persona_type, 'none') = IFNULL(NewRules.persona_type, 'none')
+            WHEN NOT MATCHED THEN
+                INSERT (rule_id, rule_type, identifier, transaction_type, persona_type, category_l1, category_l2, is_recurring_rule, confidence_score, created_timestamp, last_updated_timestamp, is_active)
+                VALUES (
+                    GENERATE_UUID(), 'transaction', NewRules.identifier, NewRules.transaction_type,
+                    NewRules.persona_type, NewRules.category_l1, NewRules.category_l2,
+                    NewRules.is_recurring_rule, NewRules.confidence_score,
+                    CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP(), TRUE
+                );
+            """
+            single_tx_desc_job = bq_client.query(merge_single_tx_desc_sql)
+            single_tx_desc_job.result()
+            total_affected_rows += single_tx_desc_job.num_dml_affected_rows or 0
+    except (GoogleAPICallError, Exception) as e:
+        logger.error(f"❌ Error harvesting single transaction description rules: {e}")
+        return f"❌ **Error During Learning**: An error occurred while harvesting single transaction description rules. Error: {e}"
+
+    # --- Part 4: Harvest 'merchant' rules from HIGH-CONFIDENCE single transactions ---
+    get_single_tx_merchant_rules_sql = f"""
     SELECT
         merchant_name_cleaned AS identifier,
         transaction_type,
@@ -986,20 +1032,20 @@ def learn_new_categorization_rules() -> str:
         category_l1,
         category_l2,
         is_recurring AS is_recurring_rule,
-        1 AS transaction_count, -- It's a single transaction
-        95 AS confidence_score -- Assign a high confidence score for these rules
+        1 AS transaction_count,
+        95 AS confidence_score
     FROM `{TABLE_ID}`
     WHERE categorization_method = 'llm-transaction-based'
       AND llm_confidence_score >= 9
       AND merchant_name_cleaned IS NOT NULL AND merchant_name_cleaned != ''
     """
     try:
-        new_single_tx_rules_df = bq_client.query(get_single_tx_rules_sql).to_dataframe()
-        if not new_single_tx_rules_df.empty:
+        new_single_tx_merchant_rules_df = bq_client.query(get_single_tx_merchant_rules_sql).to_dataframe()
+        if not new_single_tx_merchant_rules_df.empty:
             job_config = bigquery.LoadJobConfig(write_disposition="WRITE_TRUNCATE")
-            bq_client.load_table_from_dataframe(new_single_tx_rules_df, TEMP_TABLE_ID, job_config=job_config).result()
+            bq_client.load_table_from_dataframe(new_single_tx_merchant_rules_df, TEMP_TABLE_ID, job_config=job_config).result()
 
-            merge_single_tx_sql = f"""
+            merge_single_tx_merchant_sql = f"""
             MERGE `{RULES_TABLE_ID}` R
             USING `{TEMP_TABLE_ID}` NewRules
             ON R.identifier = NewRules.identifier
@@ -1015,12 +1061,12 @@ def learn_new_categorization_rules() -> str:
                     CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP(), TRUE
                 );
             """
-            single_tx_job = bq_client.query(merge_single_tx_sql)
-            single_tx_job.result()
-            total_affected_rows += single_tx_job.num_dml_affected_rows or 0
+            single_tx_merchant_job = bq_client.query(merge_single_tx_merchant_sql)
+            single_tx_merchant_job.result()
+            total_affected_rows += single_tx_merchant_job.num_dml_affected_rows or 0
     except (GoogleAPICallError, Exception) as e:
-        logger.error(f"❌ Error harvesting single transaction rules: {e}")
-        return f"❌ **Error During Learning**: An error occurred while harvesting single transaction rules. Error: {e}"
+        logger.error(f"❌ Error harvesting single transaction merchant rules: {e}")
+        return f"❌ **Error During Learning**: An error occurred while harvesting single transaction merchant rules. Error: {e}"
 
 
     if total_affected_rows > 0:
