@@ -435,7 +435,7 @@ def harmonize_recurring_transaction_categories() -> str:
 
 # --- Phase 2 & 3: AI-Based Bulk & Recurring Tools ---
 
-def get_recurring_transaction_candidates(tool_context: ToolContext, batch_size: int = 200) -> str:
+def get_recurring_transaction_candidates(tool_context: ToolContext, batch_size: int = 300) -> str:
     """
     Fetches a batch of merchants that are potential candidates for being recurring.
     Gathers evidence like transaction counts, amount stability, and time intervals.
@@ -743,7 +743,7 @@ def apply_bulk_pattern_update(categorized_json_string: str) -> str:
 
 
 # --- Phase 4: Transaction-Level AI & Learning Tools ---
-def get_transaction_batch_for_ai_categorization(tool_context: ToolContext, batch_size: int = 200, transaction_type: Optional[str] = None) -> str:
+def get_transaction_batch_for_ai_categorization(tool_context: ToolContext, batch_size: int = 500, transaction_type: Optional[str] = None) -> str:
     """
     Fetches a batch of individual uncategorized transactions for detailed, row-by-row AI processing.
     Can be filtered by transaction type.

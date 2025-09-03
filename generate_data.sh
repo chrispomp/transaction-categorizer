@@ -36,7 +36,7 @@ TABLE_ID = "transactions"
 NUM_CONSUMERS_TO_GENERATE = 5
 MIN_VARIABLE_TRANSACTIONS_PER_MONTH = 35
 MAX_VARIABLE_TRANSACTIONS_PER_MONTH = 45
-TRANSACTION_HISTORY_MONTHS = 36
+TRANSACTION_HISTORY_MONTHS = 12
 CONCURRENT_CONSUMER_JOBS = 10
 
 # --- Setup Logging ---
@@ -259,7 +259,7 @@ try:
     if not PROJECT_ID or "your-gcp-project-id" in PROJECT_ID:
         raise ValueError("PROJECT_ID is not set correctly.")
     vertexai.init(project=PROJECT_ID, location=LOCATION)
-    model = GenerativeModel("gemini-2.5-flash-lite")
+    model = GenerativeModel("gemini-2.5-flash")
     bq_client = bigquery.Client(project=PROJECT_ID)
     logging.info(f"Initialized Vertex AI and BigQuery for project '{PROJECT_ID}'")
 except Exception as e:

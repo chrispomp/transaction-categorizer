@@ -139,8 +139,7 @@ pattern_categorization_workflow = LoopAgent(
     max_iterations=20
 )
 
-# --- OPTIMIZATION: Reusable Transaction Categorizer Agent ---
-# This single agent is now smart enough to handle either 'Credit' or 'Debit'
+# --- Transaction Categorizer Agent ---
 # transactions based on the initial prompt it receives from its parent controller.
 individual_transaction_categorizer_agent = LlmAgent(
     name="individual_transaction_categorizer_agent",
