@@ -90,14 +90,20 @@ def _validate_transaction_level_results(categorized_json_string: str) -> pd.Data
         transaction_id = item.get('transaction_id')
         category_l1 = item.get('category_l1')
         category_l2 = item.get('category_l2')
-        if all([transaction_id, category_l1, category_l2]) and is_valid_category(category_l1, category_l2):
-            validated_updates.append({
-                'transaction_id': transaction_id,
-                'category_l1': category_l1,
-                'category_l2': category_l2
-            })
+        llm_confidence_score = item.get('llm_confidence_score')
+
+        if all([transaction_id, category_l1, category_l2, llm_confidence_score is not None]) and is_valid_category(category_l1, category_l2):
+            try:
+                validated_updates.append({
+                    'transaction_id': transaction_id,
+                    'category_l1': category_l1,
+                    'category_l2': category_l2,
+                    'llm_confidence_score': int(llm_confidence_score)
+                })
+            except (ValueError, TypeError):
+                logger.warning("Skipping record with invalid confidence score: %s", llm_confidence_score)
         else:
-            logger.warning("Skipping invalid category pair: L1='%s', L2='%s'", category_l1, category_l2)
+            logger.warning("Skipping invalid transaction update item: %s", item)
     return pd.DataFrame(validated_updates)
 
 def _validate_bulk_llm_results(categorized_json_string: str, required_keys: list[str]) -> pd.DataFrame:

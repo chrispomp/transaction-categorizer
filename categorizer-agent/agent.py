@@ -11,6 +11,7 @@ from google.adk.tools import AgentTool
 from .config import VALID_CATEGORIES_JSON_STR, PROJECT_ID, DATASET_ID, TABLE_ID, RULES_TABLE_ID
 from .tools import (
     get_data_quality_report,
+    prepare_database_schema,
     prepare_transaction_data,
     apply_rules_based_categorization,
     create_new_categorization_rule,
@@ -136,15 +137,17 @@ individual_transaction_categorizer_agent = LlmAgent(
     model="gemini-2.5-flash",
     tools=[get_transaction_batch_for_ai_categorization, update_transactions_with_ai_categories],
     instruction=f"""
-    You are an expert financial analyst AI. Your goal is to categorize a batch of individual transactions with perfect accuracy by following a strict set of rules.
+    You are an expert financial analyst AI. Your goal is to categorize a batch of individual transactions with perfect accuracy and to assess your own confidence in that categorization.
 
-    **Primary Directive:** For each transaction, you must assign a valid `category_l1` and `category_l2`.
+    **Primary Directive:** For each transaction, you must assign a valid `category_l1`, `category_l2`, and a `llm_confidence_score`.
 
     **LOGICAL RULES (NON-NEGOTIABLE):**
     1.  **Transaction Type Constraint:**
         - If `transaction_type` is 'Debit', `category_l1` **CANNOT** be 'Income'.
         - If `transaction_type` is 'Credit', `category_l1` **MUST** be 'Income' or 'Transfer'. It **CANNOT** be 'Expense'.
-    2.  **Valid Category Structure:** You **MUST** use the exact `category_l1` and `category_l2` pairs from the list below. Do not invent, create, or use any category not explicitly provided.
+    2.  **Valid Category Structure:** You **MUST** use the exact `category_l1` and `category_l2` pairs from the list below.
+    3.  **Confidence Score:** You **MUST** provide a `llm_confidence_score` from 1 (Not confident) to 10 (Very confident) for each categorization. A score of 9 or 10 should be reserved for "obvious" categorizations where the merchant name or description is a very strong indicator (e.g., 'SHELL' for 'Auto & Transport', 'UNITED AIRLINES' for 'Travel & Vacation').
+    4.  **JSON Output:** Your final output MUST be a single JSON list. Each item in the list must contain `transaction_id`, `category_l1`, `category_l2`, and `llm_confidence_score`.
 
     **VALID CATEGORIES:**
     {VALID_CATEGORIES_JSON_STR}
@@ -153,9 +156,10 @@ individual_transaction_categorizer_agent = LlmAgent(
     1.  **Fetch Batch:** Call `get_transaction_batch_for_ai_categorization` without a `transaction_type` to get all uncategorized transactions.
     2.  **Analyze & Categorize:**
         - If the tool returns "complete", escalate immediately.
-        - For each transaction, apply the **LOGICAL RULES** and **VALID CATEGORIES**. Use `persona_type` for context (e.g., 'UBER' income for a 'Full-Time Rideshare Driver' is 'Gig Income').
+        - For each transaction, apply the **LOGICAL RULES** and **VALID CATEGORIES**. Use `persona_type` for context.
+        - Assign a `llm_confidence_score` based on how "obvious" the categorization is.
     3.  **Update Batch:** Call `update_transactions_with_ai_categories` **once** with all categorizations for the batch.
-    4.  **Report Summary:** Use the `summary` to create a data-driven markdown report.
+    4.  **Report Summary:** Use the `summary` from the update tool's output to create a data-driven markdown report.
         - **Example:** '**Transaction Batch Processed**\n\nSuccessfully categorized **150** debit transactions. Top categories assigned:\n- Shopping: 45 transactions\n- Food & Dining: 32 transactions'
     """,
 )
@@ -192,6 +196,7 @@ financial_transaction_categorizer = Agent(
         get_data_quality_report,
         reset_all_transaction_categorizations,
         run_custom_query,
+        prepare_database_schema,
         review_and_resolve_rule_conflicts,
         prepare_transaction_data,
         apply_rules_based_categorization,
@@ -223,14 +228,15 @@ financial_transaction_categorizer = Agent(
     2.  **Executing User's Choice**:
         - If the user chooses **1 (Audit)**, call `get_data_quality_report` and present the results.
         - If the user chooses **2 (Run Full Categorization)**, you must execute the main categorization workflow. You MUST follow this order and report on the outcome of each step before proceeding to the next.
-            - **Step 1: Rule Conflict Review:** Call `review_and_resolve_rule_conflicts`.
-            - **Step 2: Data Cleansing:** Call `prepare_transaction_data`.
-            - **Step 3: Rules Application:** Call `apply_rules_based_categorization`.
-            - **Step 4: AI Merchant Categorization:** Call the `merchant_categorization_workflow` agent to categorize as many transactions as possible by merchant.
-            - **Step 5: AI Pattern Categorization:** Call the `pattern_categorization_workflow` agent to categorize as many transactions as possible by pattern.
-            - **Step 6: AI Transaction-Level Categorization:** Call the `txn_categorization_controller` agent. This controller will manage the final categorization for any remaining transactions.
-            - **Step 7: Learn New Rules:** Call `learn_new_categorization_rules` to learn from the AI's work.
-            - **Step 8: Apply Fallback Categories:** Call `apply_fallback_categorization` to ensure all transactions are categorized.
+            - **Step 1: Prepare Database:** Call `prepare_database_schema`.
+            - **Step 2: Rule Conflict Review:** Call `review_and_resolve_rule_conflicts`.
+            - **Step 3: Data Cleansing:** Call `prepare_transaction_data`.
+            - **Step 4: Rules Application:** Call `apply_rules_based_categorization`.
+            - **Step 5: AI Merchant Categorization:** Call the `merchant_categorization_workflow` agent to categorize as many transactions as possible by merchant.
+            - **Step 6: AI Pattern Categorization:** Call the `pattern_categorization_workflow` agent to categorize as many transactions as possible by pattern.
+            - **Step 7: AI Transaction-Level Categorization:** Call the `txn_categorization_controller` agent. This controller will manage the final categorization for any remaining transactions.
+            - **Step 8: Learn New Rules:** Call `learn_new_categorization_rules` to learn from the AI's work.
+            - **Step 9: Apply Fallback Categories:** Call `apply_fallback_categorization` to ensure all transactions are categorized.
             - After the final step, provide a concluding summary.
         - If the user chooses **3 (Analyze Recurring Transactions)**, you must execute the dedicated recurring analysis workflow. You MUST follow this order and report on the outcome of each step.
             - **Step 1: AI Recurring Identification:** Call the `recurring_transaction_identification_workflow` agent.

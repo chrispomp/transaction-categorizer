@@ -140,6 +140,45 @@ def run_custom_query(query: str) -> str:
         return f"❌ **Unexpected Error**\nAn unexpected error occurred. Please check the logs. Error: {e}"
 
 
+def prepare_database_schema() -> str:
+    """
+    Ensures the required columns exist in the BigQuery tables.
+    This is an idempotent operation; it will not fail if columns already exist.
+    """
+    logger.info("Preparing database schema...")
+    columns_to_add = {
+        TABLE_ID: [
+            ("llm_confidence_score", "INT64"),
+        ],
+        RULES_TABLE_ID: [
+            ("is_active", "BOOL"),
+        ]
+    }
+
+    for table_id, columns in columns_to_add.items():
+        for column_name, column_type in columns:
+            try:
+                add_column_query = f"ALTER TABLE `{table_id}` ADD COLUMN IF NOT EXISTS {column_name} {column_type};"
+                bq_client.query(add_column_query).result()
+                logger.info(f"Successfully ensured column '{column_name}' exists in table '{table_id}'.")
+            except GoogleAPICallError as e:
+                logger.error(f"Error adding column '{column_name}' to '{table_id}': {e}")
+                return f"❌ Error preparing database schema for table '{table_id}': {e}"
+
+    # Backfill is_active in rules table
+    try:
+        update_query = f"UPDATE `{RULES_TABLE_ID}` SET is_active = TRUE WHERE is_active IS NULL;"
+        update_job = bq_client.query(update_query)
+        update_job.result()
+        if (update_job.num_dml_affected_rows or 0) > 0:
+             logger.info(f"Backfilled 'is_active' flag for {update_job.num_dml_affected_rows} rules.")
+    except GoogleAPICallError as e:
+        logger.error(f"Error backfilling 'is_active' column: {e}")
+        return f"❌ Error backfilling 'is_active' column: {e}"
+
+    return "✅ **Database Schema Ready**: All required columns are present."
+
+
 # --- Phase 1: Dynamic Rules-Based Tools ---
 
 def prepare_transaction_data() -> str:
@@ -258,35 +297,7 @@ def review_and_resolve_rule_conflicts() -> str:
     """
     logger.info("Starting rule review and conflict resolution...")
 
-    # Step 1: Ensure 'is_active' column exists and is populated.
-    try:
-        # Attempt to add the column. This will fail if it already exists.
-        add_column_query = f"ALTER TABLE `{RULES_TABLE_ID}` ADD COLUMN is_active BOOL;"
-        bq_client.query(add_column_query).result()
-        logger.info("Successfully added 'is_active' column.")
-    except GoogleAPICallError as e:
-        # Ignore the error if the column already exists, otherwise return an error.
-        error_str = str(e).lower()
-        if ("duplicate column name" in error_str or "already exists" in error_str) and "is_active" in error_str:
-            logger.info("'is_active' column already exists. No action needed.")
-        else:
-            logger.error(f"Error adding 'is_active' column: {e}")
-            return f"❌ Error preparing rules table for review: {e}"
-
-    try:
-        # Backfill any NULL values for the is_active flag. This makes the operation idempotent.
-        update_query = f"UPDATE `{RULES_TABLE_ID}` SET is_active = TRUE WHERE is_active IS NULL;"
-        update_job = bq_client.query(update_query)
-        update_job.result()
-        if (update_job.num_dml_affected_rows or 0) > 0:
-             logger.info(f"Backfilled 'is_active' flag for {update_job.num_dml_affected_rows} rules.")
-        else:
-            logger.info("'is_active' column is fully populated.")
-    except GoogleAPICallError as e:
-        logger.error(f"Error populating 'is_active' column: {e}")
-        return f"❌ Error populating 'is_active' column: {e}"
-
-    # Step 2: Find conflicting rules (same identifier, different categories).
+    # Step 1: Find conflicting rules (same identifier, different categories).
     conflict_query = f"""
         WITH ConflictingRules AS (
             SELECT
@@ -799,7 +810,8 @@ def update_transactions_with_ai_categories(categorized_json_string: str) -> str:
             schema=[
                 bigquery.SchemaField("transaction_id", "STRING"),
                 bigquery.SchemaField("category_l1", "STRING"),
-                bigquery.SchemaField("category_l2", "STRING")
+                bigquery.SchemaField("category_l2", "STRING"),
+                bigquery.SchemaField("llm_confidence_score", "INTEGER"),
             ],
             write_disposition="WRITE_TRUNCATE",
         )
@@ -813,6 +825,7 @@ def update_transactions_with_ai_categories(categorized_json_string: str) -> str:
                 UPDATE SET
                     T.category_l1 = U.category_l1,
                     T.category_l2 = U.category_l2,
+                    T.llm_confidence_score = U.llm_confidence_score,
                     T.categorization_method = 'llm-transaction-based',
                     T.categorization_update_timestamp = CURRENT_TIMESTAMP();
         """
@@ -851,7 +864,7 @@ def learn_new_categorization_rules() -> str:
     logger.info("Harvesting new persona-aware rules from AI categorizations...")
     total_affected_rows = 0
 
-    # --- Part 1: Harvest Merchant rules ---
+    # --- Part 1: Harvest Merchant rules from BULK processing ---
     get_merchants_sql = f"""
     SELECT
         merchant_name_cleaned AS identifier,
@@ -860,12 +873,13 @@ def learn_new_categorization_rules() -> str:
         category_l1,
         category_l2,
         LOGICAL_AND(IFNULL(is_recurring, FALSE)) AS is_recurring_rule,
-        COUNT(transaction_id) AS transaction_count
+        COUNT(transaction_id) AS transaction_count,
+        'llm-bulk-merchant-based' as source_method
     FROM `{TABLE_ID}`
-    WHERE categorization_method IN ('llm-bulk-merchant-based')
+    WHERE categorization_method = 'llm-bulk-merchant-based'
         AND merchant_name_cleaned IS NOT NULL AND merchant_name_cleaned != ''
     GROUP BY 1, 2, 3, 4, 5
-    HAVING COUNT(transaction_id) >= 3;
+    HAVING COUNT(transaction_id) >= 3
     """
     try:
         new_merchant_rules_df = bq_client.query(get_merchants_sql).to_dataframe()
@@ -907,7 +921,7 @@ def learn_new_categorization_rules() -> str:
         logger.error(f"❌ Error harvesting merchant rules: {e}")
         return f"❌ **Error During Learning**: An error occurred while harvesting merchant rules. Error: {e}"
 
-    # --- Part 2: Harvest Pattern rules ---
+    # --- Part 2: Harvest Pattern rules from BULK processing ---
         get_patterns_sql = f"""
         SELECT
             SUBSTR(description_cleaned, 1, 40) AS identifier,
@@ -918,10 +932,10 @@ def learn_new_categorization_rules() -> str:
             LOGICAL_AND(IFNULL(is_recurring, FALSE)) AS is_recurring_rule,
             COUNT(transaction_id) AS transaction_count
         FROM `{TABLE_ID}`
-        WHERE categorization_method IN ('llm-bulk-pattern-based')
+        WHERE categorization_method = 'llm-bulk-pattern-based'
             AND description_cleaned IS NOT NULL AND description_cleaned != ''
         GROUP BY 1, 2, 3, 4, 5
-        HAVING COUNT(transaction_id) >= 3;
+        HAVING COUNT(transaction_id) >= 3
         """
         try:
             new_pattern_rules_df = bq_client.query(get_patterns_sql).to_dataframe()
@@ -963,12 +977,58 @@ def learn_new_categorization_rules() -> str:
             logger.error(f"❌ Error harvesting pattern rules: {e}")
             return f"❌ **Error During Learning**: An error occurred while harvesting pattern rules. Error: {e}"
 
-        if total_affected_rows > 0:
-            logger.info("✅ Successfully harvested %d new or updated rules.", total_affected_rows)
-            return f"🧠 **Learning Complete**: Analyzed AI categorizations and created or updated **{total_affected_rows}** new high-confidence rules."
-        else:
-            logger.info("No new high-confidence rules to harvest.")
-            return "🧠 **Learning Complete**: No new patterns met the confidence threshold to be saved as rules."
+    # --- Part 3: Harvest rules from HIGH-CONFIDENCE single transactions ---
+    get_single_tx_rules_sql = f"""
+    SELECT
+        merchant_name_cleaned AS identifier,
+        transaction_type,
+        persona_type,
+        category_l1,
+        category_l2,
+        is_recurring AS is_recurring_rule,
+        1 AS transaction_count, -- It's a single transaction
+        95 AS confidence_score -- Assign a high confidence score for these rules
+    FROM `{TABLE_ID}`
+    WHERE categorization_method = 'llm-transaction-based'
+      AND llm_confidence_score >= 9
+      AND merchant_name_cleaned IS NOT NULL AND merchant_name_cleaned != ''
+    """
+    try:
+        new_single_tx_rules_df = bq_client.query(get_single_tx_rules_sql).to_dataframe()
+        if not new_single_tx_rules_df.empty:
+            job_config = bigquery.LoadJobConfig(write_disposition="WRITE_TRUNCATE")
+            bq_client.load_table_from_dataframe(new_single_tx_rules_df, TEMP_TABLE_ID, job_config=job_config).result()
+
+            merge_single_tx_sql = f"""
+            MERGE `{RULES_TABLE_ID}` R
+            USING `{TEMP_TABLE_ID}` NewRules
+            ON R.identifier = NewRules.identifier
+                AND R.rule_type = 'merchant'
+                AND R.transaction_type = NewRules.transaction_type
+                AND IFNULL(R.persona_type, 'none') = IFNULL(NewRules.persona_type, 'none')
+            WHEN NOT MATCHED THEN
+                INSERT (rule_id, rule_type, identifier, transaction_type, persona_type, category_l1, category_l2, is_recurring_rule, confidence_score, created_timestamp, last_updated_timestamp, is_active)
+                VALUES (
+                    GENERATE_UUID(), 'merchant', NewRules.identifier, NewRules.transaction_type,
+                    NewRules.persona_type, NewRules.category_l1, NewRules.category_l2,
+                    NewRules.is_recurring_rule, NewRules.confidence_score,
+                    CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP(), TRUE
+                );
+            """
+            single_tx_job = bq_client.query(merge_single_tx_sql)
+            single_tx_job.result()
+            total_affected_rows += single_tx_job.num_dml_affected_rows or 0
+    except (GoogleAPICallError, Exception) as e:
+        logger.error(f"❌ Error harvesting single transaction rules: {e}")
+        return f"❌ **Error During Learning**: An error occurred while harvesting single transaction rules. Error: {e}"
+
+
+    if total_affected_rows > 0:
+        logger.info("✅ Successfully harvested %d new or updated rules.", total_affected_rows)
+        return f"🧠 **Learning Complete**: Analyzed AI categorizations and created or updated **{total_affected_rows}** new high-confidence rules."
+    else:
+        logger.info("No new high-confidence rules to harvest.")
+        return "🧠 **Learning Complete**: No new patterns met the confidence threshold to be saved as rules."
 
 def create_new_categorization_rule(
     identifier: str,
